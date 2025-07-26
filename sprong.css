@@ -21,6 +21,8 @@ h1 {
     border: 2px solid #00ff88;
     box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
     background: #0a0a0a;
+    touch-action: none; /* Prevent scrolling on touch devices */
+    user-select: none;  /* Prevent text selection */
 }
 
 .info {

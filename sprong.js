@@ -1,5 +1,5 @@
 // Matter.js module aliases
-const Body  = Matter.Body;
+const Body = Matter.Body;
 const World = Matter.World;
 const Engine = Matter.Engine;
 const Bodies = Matter.Bodies;
@@ -25,6 +25,16 @@ let gameStarted = false;
 let keys = {};
 let inputBuffer = { left: 0, right: 0 };
 
+// Touch/mouse input
+let mouseInput = {
+    active: false,
+    targetY: 0,
+    leftPaddleTarget: 0,
+    rightPaddleTarget: 0,
+    smoothing: 0.08,  // Slower smoothing for deliberate lag
+    deadZone: 15      // Minimum distance before movement starts
+};
+
 // Particle systems
 let particles = [];
 let impactParticles = [];
@@ -39,22 +49,27 @@ const BALL_RADIUS   = 12;
 const PADDLE_WIDTH  = 20;
 const PADDLE_HEIGHT = 80;
 
-// Enhanced movement constants
-const SUPPORT_SPEED     = 6.5;
-const SUPPORT_ACCEL     = 1.2;
-const INPUT_SMOOTHING   = 0.25
-const SUPPORT_MAX_SPEED = 8;  
+// Enhanced movement constants (tuned for faster response)
+const SUPPORT_SPEED     = 6.5;  // Bumped up from 4.5
+const SUPPORT_ACCEL     = 1.2;  // Increased acceleration
+const INPUT_SMOOTHING   = 0.25; // More responsive
+const SUPPORT_MAX_SPEED = 8;    // Higher max speed
 
-// Spring physics constants
-const PADDLE_MASS       = 0.6;
+// Touch/mouse control constants
+const MOUSE_SPEED_LIMIT = 4;    // Max speed for mouse movement
+const MOUSE_LAG_FACTOR  = 0.12; // How much lag in mouse following
+const TOUCH_SENSITIVITY = 1.2;  // Touch movement multiplier
+
+// Spring physics constants (tuned for bounciness!)
+const PADDLE_MASS       = 0.6;  // Lighter for more bounce
 const SPRING_LENGTH     = 40;
-const SPRING_DAMPING    = 0.4;
-const SPRING_STIFFNESS  = 0.035;
+const SPRING_DAMPING    = 0.4;  // Much less damping = more bounce!
+const SPRING_STIFFNESS  = 0.035; // Higher stiffness = snappier
 
 // Visual enhancement constants
 const TRAIL_SEGMENTS        = 8;
 const PADDLE_GLOW_DISTANCE  = 25;
-const SPRING_GLOW_INTENSITY = 120;
+const SPRING_GLOW_INTENSITY = 120; // More intense glow
 
 // Particle system constants
 const MAX_PARTICLES         = 100;
@@ -94,12 +109,17 @@ function setup() {
         leftSupport, leftPaddle, leftSpring,
         rightSupport, rightPaddle, rightSpring
     ]);
+    
+    console.log("🎮 Sprong Phase 5 Complete!");
+    console.log("✓ Particle effects system");
+    console.log("✓ Tuned physics for maximum bounce");
+    console.log("✓ Faster, more responsive paddles");
 }
 
 function createSpringPaddleSystem(side) {
-    let startY    = height / 2;
-    let supportX  = side === 'left' ? 60 : width - 60;
-    let paddleX   = side === 'left' ? 60 + SPRING_LENGTH : width - 60 - SPRING_LENGTH;
+    let supportX = side === 'left' ? 60 : width - 60;
+    let paddleX = side === 'left' ? 60 + SPRING_LENGTH : width - 60 - SPRING_LENGTH;
+    let startY = height / 2;
     
     if (side === 'left') {
         // Left support (invisible anchor point controlled by player)
@@ -111,7 +131,7 @@ function createSpringPaddleSystem(side) {
         // Left paddle (the actual hitting surface)
         leftPaddle = Bodies.rectangle(paddleX, startY, PADDLE_WIDTH, PADDLE_HEIGHT, {
             mass: PADDLE_MASS,
-            restitution: 1.3,
+            restitution: 1.3,  // Even bouncier!
             friction: 0,
             frictionAir: 0.005 // Less air resistance
         });
@@ -186,6 +206,12 @@ function draw() {
 }
 
 function handleEnhancedInput() {
+    // Handle both keyboard and mouse/touch input
+    handleKeyboardInput();
+    handleMouseTouchInput();
+}
+
+function handleKeyboardInput() {
     // Smooth input accumulation with acceleration
     let leftInput   = 0;
     let rightInput  = 0;
@@ -198,16 +224,52 @@ function handleEnhancedInput() {
     if (keys['ArrowUp'])    rightInput -= 1;
     if (keys['ArrowDown'])  rightInput += 1;
     
-    // Apply acceleration and smoothing
+    // Apply acceleration and smoothing for keyboard
     inputBuffer.left = lerp(inputBuffer.left, leftInput, INPUT_SMOOTHING);
     inputBuffer.right = lerp(inputBuffer.right, rightInput, INPUT_SMOOTHING);
     
-    // Move supports with enhanced physics
-    if (Math.abs(inputBuffer.left) > 0.01) {
-        moveSupportEnhanced(leftSupport, inputBuffer.left * SUPPORT_SPEED);
+    // Move supports with enhanced physics (only if not using mouse)
+    if (!mouseInput.active) {
+        if (Math.abs(inputBuffer.left) > 0.01) {
+            moveSupportEnhanced(leftSupport, inputBuffer.left * SUPPORT_SPEED);
+        }
+        if (Math.abs(inputBuffer.right) > 0.01) {
+            moveSupportEnhanced(rightSupport, inputBuffer.right * SUPPORT_SPEED);
+        }
     }
-    if (Math.abs(inputBuffer.right) > 0.01) {
-        moveSupportEnhanced(rightSupport, inputBuffer.right * SUPPORT_SPEED);
+}
+
+function handleMouseTouchInput() {
+    if (!mouseInput.active) return;
+    
+    // Determine which paddle to control based on mouse X position
+    let controllingLeft = mouseX < width / 2;
+    let targetSupport = controllingLeft ? leftSupport : rightSupport;
+    
+    // Calculate target Y with dead zone
+    let currentY = targetSupport.position.y;
+    let targetY = mouseY;
+    let deltaY = targetY - currentY;
+    
+    // Apply dead zone - don't move unless mouse is far enough
+    if (Math.abs(deltaY) < mouseInput.deadZone) {
+        return;
+    }
+    
+    // Calculate movement with lag and speed limiting
+    let movement = deltaY * MOUSE_LAG_FACTOR * TOUCH_SENSITIVITY;
+    
+    // Limit maximum speed to prevent snappy movement
+    movement = constrain(movement, -MOUSE_SPEED_LIMIT, MOUSE_SPEED_LIMIT);
+    
+    // Apply the lagged movement
+    moveSupportEnhanced(targetSupport, movement);
+    
+    // Visual feedback - update input buffer for particle effects
+    if (controllingLeft) {
+        inputBuffer.left = constrain(movement / MOUSE_SPEED_LIMIT, -1, 1);
+    } else {
+        inputBuffer.right = constrain(movement / MOUSE_SPEED_LIMIT, -1, 1);
     }
 }
 
@@ -570,6 +632,12 @@ function drawDebugInfo() {
     text(`L Spring: ${Math.round(leftSpringLength)}px (${((SPRING_LENGTH/leftSpringLength - 1) * 100).toFixed(0)}%)`, 10, 65);
     text(`R Spring: ${Math.round(rightSpringLength)}px (${((SPRING_LENGTH/rightSpringLength - 1) * 100).toFixed(0)}%)`, 10, 80);
     text(`Input: L=${inputBuffer.left.toFixed(2)} R=${inputBuffer.right.toFixed(2)}`, 10, 95);
+    
+    // Mouse/touch input debug
+    if (mouseInput.active) {
+        text(`Mouse: ${mouseInput.active ? 'Active' : 'Inactive'} | Side: ${mouseX < width/2 ? 'Left' : 'Right'}`, 10, 110);
+        text(`Mouse Y: ${mouseY} | Dead Zone: ${mouseInput.deadZone}px`, 10, 125);
+    }
 }
 
 function drawStartMessage() {
@@ -578,7 +646,9 @@ function drawStartMessage() {
     textSize(20);
     text("Press any key to start!", width/2, height/2 + 100);
     textSize(14);
-    text("Bouncier springs, faster paddles, explosive particles!", width/2, height/2 + 125);
+    text("Keyboard: W/S + ↑/↓ | Mouse/Touch: Drag paddles", width/2, height/2 + 125);
+    textSize(12);
+    text("(Mouse movement has deliberate lag to preserve challenge!)", width/2, height/2 + 145);
 }
 
 function resetBall() {
@@ -660,6 +730,9 @@ function keyPressed() {
         inputBuffer.left = 0;
         inputBuffer.right = 0;
         
+        // Reset mouse input
+        mouseInput.active = false;
+        
         // Clear particles
         particles = [];
         
@@ -670,4 +743,51 @@ function keyPressed() {
 function keyReleased() {
     keys[key] = false;
     keys[keyCode] = false;
+}
+
+// Mouse/touch input handlers
+function mousePressed() {
+    // Start mouse/touch input when clicking in game area
+    if (mouseX >= 0 && mouseX <= width && mouseY >= 0 && mouseY <= height) {
+        mouseInput.active = true;
+        
+        // Start game if not started
+        if (!gameStarted) {
+            gameStarted = true;
+        }
+        
+        return false; // Prevent default behavior
+    }
+}
+
+function mouseDragged() {
+    // Continue mouse/touch input while dragging
+    if (mouseInput.active) {
+        return false; // Prevent default behavior
+    }
+}
+
+function mouseReleased() {
+    // Stop mouse/touch input when releasing
+    mouseInput.active = false;
+    
+    // Gradually reduce input buffer when mouse is released
+    inputBuffer.left *= 0.8;
+    inputBuffer.right *= 0.8;
+}
+
+function touchStarted() {
+    // Handle touch events same as mouse
+    return mousePressed();
+}
+
+function touchMoved() {
+    // Handle touch drag same as mouse
+    return mouseDragged();
+}
+
+function touchEnded() {
+    // Handle touch end same as mouse
+    mouseReleased();
+    return false;
 }
