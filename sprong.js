@@ -20,6 +20,27 @@ let rightSupport, rightPaddle, rightSpring;
 let leftScore = 0;
 let rightScore = 0;
 let gameStarted = false;
+let gameState = 'menu'; // 'menu', 'playing', 'paused'
+let gameMode = 'vs-cpu'; // 'vs-cpu' or 'vs-human'
+let aiEnabled = true;
+
+// Menu state
+let menuState = {
+    selectedOption: 0, // 0 = 1 Player, 1 = 2 Player
+    options: ['1 Player vs CPU', '2 Player'],
+    difficultySelected: 1, // 0 = Easy, 1 = Medium, 2 = Hard
+    difficulties: ['Easy', 'Medium', 'Hard'],
+    showDifficulty: true
+};
+
+// AI system
+let aiState = {
+    targetY: 200,
+    reactionDelay: 0,
+    difficulty: 'medium', // 'easy', 'medium', 'hard'
+    lastBallX: 0,
+    lastUpdateTime: 0
+};
 
 // Player input
 let keys = {};
@@ -60,11 +81,33 @@ const MOUSE_SPEED_LIMIT = 4;    // Max speed for mouse movement
 const MOUSE_LAG_FACTOR  = 0.12; // How much lag in mouse following
 const TOUCH_SENSITIVITY = 1.2;  // Touch movement multiplier
 
-// Spring physics constants (tuned for bounciness!)
-const PADDLE_MASS       = 0.6;  // Lighter for more bounce
+// Spring physics constants (toned down for stability)
+const PADDLE_MASS       = 0.8;  // Back to more stable value
 const SPRING_LENGTH     = 40;
-const SPRING_DAMPING    = 0.4;  // Much less damping = more bounce!
-const SPRING_STIFFNESS  = 0.035; // Higher stiffness = snappier
+const SPRING_DAMPING    = 0.6;  // More damping = less erratic
+const SPRING_STIFFNESS  = 0.025; // Slightly lower for smoother motion
+
+// AI difficulty settings
+const AI_SETTINGS = {
+    easy: {
+        reactionTime: 400,    // ms delay
+        accuracy: 0.7,        // 70% accuracy
+        speed: 0.6,           // 60% of normal speed
+        prediction: 0.3       // 30% prediction vs reaction
+    },
+    medium: {
+        reactionTime: 250,
+        accuracy: 0.85,
+        speed: 0.8,
+        prediction: 0.6
+    },
+    hard: {
+        reactionTime: 150,
+        accuracy: 0.95,
+        speed: 1.0,
+        prediction: 0.8
+    }
+};
 
 // Visual enhancement constants
 const TRAIL_SEGMENTS        = 8;
@@ -154,9 +197,9 @@ function createSpringPaddleSystem(side) {
         // Right paddle (the actual hitting surface)
         rightPaddle = Bodies.rectangle(paddleX, startY, PADDLE_WIDTH, PADDLE_HEIGHT, {
             mass: PADDLE_MASS,
-            restitution: 1.3,
+            restitution: 1.2,  // Slightly toned down
             friction: 0,
-            frictionAir: 0.005
+            frictionAir: 0.008 // Bit more air resistance for stability
         });
         
         // Spring constraint connecting support to paddle
@@ -174,34 +217,38 @@ function draw() {
     // Update physics
     Engine.update(engine);
     
-    // Handle enhanced player input
-    handleEnhancedInput();
-    
-    // Update particle systems
-    updateParticles();
-    checkCollisions();
-    
-    // Check for scoring
-    checkBallPosition();
-    
     // Clear canvas
     background(10, 10, 10);
     
-    // Draw particles behind everything
-    drawParticles();
-    
-    // Draw game objects with enhanced visuals
-    drawSpringPaddleSystemsEnhanced();
-    drawBallEnhanced();
-    drawBoundaries();
-    drawCenterLine();
-    
-    // Draw debug info
-    drawDebugInfo();
-    
-    // Start message
-    if (!gameStarted) {
-        drawStartMessage();
+    if (gameState === 'menu') {
+        drawMenu();
+    } else {
+        // Handle enhanced player input
+        handleEnhancedInput();
+        
+        // Update particle systems
+        updateParticles();
+        checkCollisions();
+        
+        // Check for scoring
+        checkBallPosition();
+        
+        // Draw particles behind everything
+        drawParticles();
+        
+        // Draw game objects with enhanced visuals
+        drawSpringPaddleSystemsEnhanced();
+        drawBallEnhanced();
+        drawBoundaries();
+        drawCenterLine();
+        
+        // Draw debug info
+        drawDebugInfo();
+        
+        // Start message
+        if (!gameStarted) {
+            drawStartMessage();
+        }
     }
 }
 
@@ -209,6 +256,11 @@ function handleEnhancedInput() {
     // Handle both keyboard and mouse/touch input
     handleKeyboardInput();
     handleMouseTouchInput();
+    
+    // Handle AI if enabled
+    if (aiEnabled && gameStarted) {
+        handleAI();
+    }
 }
 
 function handleKeyboardInput() {
@@ -216,24 +268,28 @@ function handleKeyboardInput() {
     let leftInput   = 0;
     let rightInput  = 0;
     
-    // Left paddle input (W/S keys)
+    // Left paddle input (W/S keys) - always player controlled
     if (keys['w'] || keys['W']) leftInput -= 1;
     if (keys['s'] || keys['S']) leftInput += 1;
     
-    // Right paddle input (Arrow keys)
-    if (keys['ArrowUp'])    rightInput -= 1;
-    if (keys['ArrowDown'])  rightInput += 1;
+    // Right paddle input (Arrow keys) - only if AI is disabled
+    if (!aiEnabled) {
+        if (keys['ArrowUp'])    rightInput -= 1;
+        if (keys['ArrowDown'])  rightInput += 1;
+    }
     
     // Apply acceleration and smoothing for keyboard
     inputBuffer.left = lerp(inputBuffer.left, leftInput, INPUT_SMOOTHING);
-    inputBuffer.right = lerp(inputBuffer.right, rightInput, INPUT_SMOOTHING);
+    if (!aiEnabled) {
+        inputBuffer.right = lerp(inputBuffer.right, rightInput, INPUT_SMOOTHING);
+    }
     
     // Move supports with enhanced physics (only if not using mouse)
     if (!mouseInput.active) {
         if (Math.abs(inputBuffer.left) > 0.01) {
             moveSupportEnhanced(leftSupport, inputBuffer.left * SUPPORT_SPEED);
         }
-        if (Math.abs(inputBuffer.right) > 0.01) {
+        if (!aiEnabled && Math.abs(inputBuffer.right) > 0.01) {
             moveSupportEnhanced(rightSupport, inputBuffer.right * SUPPORT_SPEED);
         }
     }
@@ -244,6 +300,10 @@ function handleMouseTouchInput() {
     
     // Determine which paddle to control based on mouse X position
     let controllingLeft = mouseX < width / 2;
+    
+    // Don't allow mouse control of AI paddle
+    if (!controllingLeft && aiEnabled) return;
+    
     let targetSupport = controllingLeft ? leftSupport : rightSupport;
     
     // Calculate target Y with dead zone
@@ -268,8 +328,56 @@ function handleMouseTouchInput() {
     // Visual feedback - update input buffer for particle effects
     if (controllingLeft) {
         inputBuffer.left = constrain(movement / MOUSE_SPEED_LIMIT, -1, 1);
-    } else {
+    } else if (!aiEnabled) {
         inputBuffer.right = constrain(movement / MOUSE_SPEED_LIMIT, -1, 1);
+    }
+}
+
+function handleAI() {
+    let currentTime = millis();
+    let ballPos = ball.position;
+    let ballVel = ball.velocity;
+    let aiSettings = AI_SETTINGS[aiState.difficulty];
+    
+    // Only update AI decision if enough time has passed (reaction delay)
+    if (currentTime - aiState.lastUpdateTime > aiSettings.reactionTime) {
+        
+        // Calculate where ball will be (basic prediction)
+        let ballFutureX = ballPos.x + ballVel.x * 30; // Look 30 frames ahead
+        let ballFutureY = ballPos.y + ballVel.y * 30;
+        
+        // Only react if ball is moving toward AI paddle
+        if (ballVel.x > 0) {
+            // Mix prediction with current position based on AI skill
+            let targetY = lerp(ballPos.y, ballFutureY, aiSettings.prediction);
+            
+            // Add some inaccuracy to make it beatable
+            let error = (random() - 0.5) * 50 * (1 - aiSettings.accuracy);
+            targetY += error;
+            
+            // Keep target in bounds
+            targetY = constrain(targetY, 80, height - 80);
+            
+            aiState.targetY = targetY;
+            aiState.lastUpdateTime = currentTime;
+        }
+    }
+    
+    // Move AI paddle toward target with speed limitation
+    let currentY = rightSupport.position.y;
+    let deltaY = aiState.targetY - currentY;
+    
+    if (Math.abs(deltaY) > 5) { // Dead zone
+        let movement = deltaY * 0.08 * aiSettings.speed; // Smooth movement
+        movement = constrain(movement, -SUPPORT_SPEED * 0.8, SUPPORT_SPEED * 0.8);
+        
+        moveSupportEnhanced(rightSupport, movement);
+        
+        // Update input buffer for visual effects
+        inputBuffer.right = constrain(movement / (SUPPORT_SPEED * 0.8), -1, 1);
+    } else {
+        // Gradually reduce input buffer when AI is not moving
+        inputBuffer.right *= 0.9;
     }
 }
 
@@ -502,6 +610,9 @@ function drawSinglePaddleEnhanced(paddle, ballDistance) {
     let pos = paddle.position;
     let angle = paddle.angle;
     
+    // Check if this is the AI paddle
+    let isAI = aiEnabled && paddle === rightPaddle;
+    
     // Calculate glow intensity based on ball proximity
     let glowIntensity = map(ballDistance, 0, PADDLE_GLOW_DISTANCE, 150, 0);
     glowIntensity = constrain(glowIntensity, 0, 150);
@@ -510,27 +621,34 @@ function drawSinglePaddleEnhanced(paddle, ballDistance) {
     translate(pos.x, pos.y);
     rotate(angle);
     
+    // Different color scheme for AI paddle
+    let paddleColor = isAI ? [255, 100, 100] : [0, 255, 136]; // Red for AI, green for player
+    
     // Draw enhanced glow effect first
     if (glowIntensity > 0) {
-        fill(0, 255, 136, glowIntensity * 0.6);
+        fill(paddleColor[0], paddleColor[1], paddleColor[2], glowIntensity * 0.6);
         noStroke();
         rectMode(CENTER);
         rect(0, 0, PADDLE_WIDTH + 12, PADDLE_HEIGHT + 12);
         
         // Add outer glow
-        fill(0, 255, 136, glowIntensity * 0.3);
+        fill(paddleColor[0], paddleColor[1], paddleColor[2], glowIntensity * 0.3);
         rect(0, 0, PADDLE_WIDTH + 20, PADDLE_HEIGHT + 20);
     }
     
     // Draw main paddle with enhanced visual
-    fill(0, 255, 136);
-    stroke(0, 255, 136, 220 + glowIntensity * 0.5);
+    fill(paddleColor[0], paddleColor[1], paddleColor[2]);
+    stroke(paddleColor[0], paddleColor[1], paddleColor[2], 220 + glowIntensity * 0.5);
     strokeWeight(3);
     rectMode(CENTER);
     rect(0, 0, PADDLE_WIDTH, PADDLE_HEIGHT);
     
     // Add core highlight
-    fill(150, 255, 200, 100);
+    if (isAI) {
+        fill(255, 200, 200, 100); // Light red highlight for AI
+    } else {
+        fill(150, 255, 200, 100); // Light green highlight for player
+    }
     noStroke();
     rect(0, 0, PADDLE_WIDTH - 4, PADDLE_HEIGHT - 4);
     
@@ -622,6 +740,7 @@ function drawDebugInfo() {
     text(`FPS: ${Math.round(frameRate())}`, 10, 20);
     text(`Ball Speed: ${Math.round(getBallSpeed())}`, 10, 35);
     text(`Particles: ${particles.length}`, 10, 50);
+    text(`Mode: ${aiEnabled ? 'vs CPU' : '2 Player'} | Difficulty: ${aiState.difficulty}`, 10, 65);
     
     // Enhanced spring info
     let leftSpringLength = dist(leftSupport.position.x, leftSupport.position.y, 
@@ -629,15 +748,119 @@ function drawDebugInfo() {
     let rightSpringLength = dist(rightSupport.position.x, rightSupport.position.y, 
                                 rightPaddle.position.x, rightPaddle.position.y);
     
-    text(`L Spring: ${Math.round(leftSpringLength)}px (${((SPRING_LENGTH/leftSpringLength - 1) * 100).toFixed(0)}%)`, 10, 65);
-    text(`R Spring: ${Math.round(rightSpringLength)}px (${((SPRING_LENGTH/rightSpringLength - 1) * 100).toFixed(0)}%)`, 10, 80);
-    text(`Input: L=${inputBuffer.left.toFixed(2)} R=${inputBuffer.right.toFixed(2)}`, 10, 95);
+    text(`L Spring: ${Math.round(leftSpringLength)}px (${((SPRING_LENGTH/leftSpringLength - 1) * 100).toFixed(0)}%)`, 10, 80);
+    text(`R Spring: ${Math.round(rightSpringLength)}px (${((SPRING_LENGTH/rightSpringLength - 1) * 100).toFixed(0)}%)`, 10, 95);
+    text(`Input: L=${inputBuffer.left.toFixed(2)} R=${inputBuffer.right.toFixed(2)}`, 10, 110);
+    
+    // AI debug info
+    if (aiEnabled) {
+        text(`AI Target: ${Math.round(aiState.targetY)} | Ball Y: ${Math.round(ball.position.y)}`, 10, 125);
+        text(`Ball Vel: X=${ball.velocity.x.toFixed(1)} Y=${ball.velocity.y.toFixed(1)}`, 10, 140);
+    }
     
     // Mouse/touch input debug
     if (mouseInput.active) {
-        text(`Mouse: ${mouseInput.active ? 'Active' : 'Inactive'} | Side: ${mouseX < width/2 ? 'Left' : 'Right'}`, 10, 110);
-        text(`Mouse Y: ${mouseY} | Dead Zone: ${mouseInput.deadZone}px`, 10, 125);
+        text(`Mouse: Active | Side: ${mouseX < width/2 ? 'Left' : 'Right'} | Y: ${mouseY}`, 10, 155);
     }
+}
+
+function drawMenu() {
+    // Draw animated background
+    drawMenuBackground();
+    
+    // Main title
+    push();
+    let titlePulse = sin(frameCount * 0.05) * 0.2 + 1;
+    fill(0, 255, 136);
+    textAlign(CENTER);
+    textSize(60 * titlePulse);
+    text("SPRONG", width/2, 120);
+    
+    // Subtitle
+    fill(0, 255, 136, 150);
+    textSize(16);
+    text("Physics-based Pong with Spring Paddles", width/2, 150);
+    pop();
+    
+    // Menu options
+    let startY = height/2 - 20;
+    let spacing = 60;
+    
+    for (let i = 0; i < menuState.options.length; i++) {
+        let y = startY + i * spacing;
+        let isSelected = i === menuState.selectedOption;
+        
+        // Selection indicator
+        if (isSelected) {
+            push();
+            let pulse = sin(frameCount * 0.15) * 0.3 + 1;
+            fill(0, 255, 136, 100 * pulse);
+            noStroke();
+            rectMode(CENTER);
+            rect(width/2, y, 300, 45);
+            pop();
+        }
+        
+        // Option text
+        fill(isSelected ? 255 : 200);
+        textAlign(CENTER);
+        textSize(isSelected ? 24 : 20);
+        text(menuState.options[i], width/2, y + 8);
+        
+        // Show difficulty selector for 1 Player option
+        if (i === 0 && isSelected && menuState.showDifficulty) {
+            fill(0, 255, 136, 180);
+            textSize(14);
+            text(`Difficulty: ${menuState.difficulties[menuState.difficultySelected]}`, width/2, y + 28);
+            text("(Use ← → to change)", width/2, y + 45);
+        }
+    }
+    
+    // Instructions
+    fill(0, 255, 136, 120);
+    textAlign(CENTER);
+    textSize(14);
+    text("Use ↑↓ to select, ENTER to confirm", width/2, height - 80);
+    text("or click/touch to select", width/2, height - 60);
+    
+    // Show controls preview
+    textSize(12);
+    fill(255, 100);
+    if (menuState.selectedOption === 0) {
+        text("Controls: W/S keys or Mouse/Touch to move paddle", width/2, height - 30);
+    } else {
+        text("Controls: Player 1 (W/S) | Player 2 (↑/↓) | Mouse/Touch", width/2, height - 30);
+    }
+}
+
+function drawMenuBackground() {
+    // Draw subtle animated background elements
+    push();
+    stroke(0, 255, 136, 30);
+    strokeWeight(1);
+    
+    // Animated grid
+    for (let x = 0; x < width; x += 40) {
+        let offset = sin(frameCount * 0.01 + x * 0.01) * 5;
+        line(x, 0, x, height + offset);
+    }
+    
+    for (let y = 0; y < height; y += 40) {
+        let offset = cos(frameCount * 0.01 + y * 0.01) * 5;
+        line(0, y, width + offset, y);
+    }
+    
+    // Floating particles
+    for (let i = 0; i < 20; i++) {
+        let x = (frameCount * 0.5 + i * 137) % width;
+        let y = (sin(frameCount * 0.01 + i) * 50 + height/2);
+        let alpha = sin(frameCount * 0.02 + i) * 30 + 50;
+        
+        fill(0, 255, 136, alpha);
+        noStroke();
+        ellipse(x, y, 3, 3);
+    }
+    pop();
 }
 
 function drawStartMessage() {
@@ -646,9 +869,17 @@ function drawStartMessage() {
     textSize(20);
     text("Press any key to start!", width/2, height/2 + 100);
     textSize(14);
-    text("Keyboard: W/S + ↑/↓ | Mouse/Touch: Drag paddles", width/2, height/2 + 125);
+    
+    if (aiEnabled) {
+        text("Player vs CPU | Left paddle: W/S or Mouse/Touch", width/2, height/2 + 125);
+        text(`AI Difficulty: ${aiState.difficulty.toUpperCase()}`, width/2, height/2 + 145);
+    } else {
+        text("2 Player Mode | P1: W/S | P2: ↑/↓ | Mouse/Touch: Drag paddles", width/2, height/2 + 125);
+    }
+    
     textSize(12);
-    text("(Mouse movement has deliberate lag to preserve challenge!)", width/2, height/2 + 145);
+    fill(0, 255, 136, 120);
+    text("Press ESC to return to menu", width/2, height/2 + 170);
 }
 
 function resetBall() {
@@ -714,8 +945,32 @@ function keyPressed() {
     keys[key] = true;
     keys[keyCode] = true;
     
+    if (gameState === 'menu') {
+        handleMenuInput();
+        return;
+    }
+    
     if (!gameStarted && key !== ' ') {
         gameStarted = true;
+    }
+    
+    // Toggle game mode (only during gameplay)
+    if (key === 'm' || key === 'M') {
+        aiEnabled = !aiEnabled;
+        gameMode = aiEnabled ? 'vs-cpu' : 'vs-human';
+        console.log(`🎮 Switched to ${gameMode} mode`);
+    }
+    
+    // Change AI difficulty (only during gameplay)
+    if (key === 'd' || key === 'D') {
+        if (aiState.difficulty === 'easy') {
+            aiState.difficulty = 'medium';
+        } else if (aiState.difficulty === 'medium') {
+            aiState.difficulty = 'hard';
+        } else {
+            aiState.difficulty = 'easy';
+        }
+        console.log(`🤖 AI difficulty: ${aiState.difficulty}`);
     }
     
     // Reset game with spacebar
@@ -733,11 +988,84 @@ function keyPressed() {
         // Reset mouse input
         mouseInput.active = false;
         
+        // Reset AI state
+        aiState.targetY = height / 2;
+        aiState.lastUpdateTime = 0;
+        
         // Clear particles
         particles = [];
         
         console.log("🔄 Game reset!");
     }
+    
+    // Return to menu with ESC
+    if (keyCode === 27) { // ESC key
+        gameState = 'menu';
+        gameStarted = false;
+        particles = [];
+        console.log("📋 Returned to menu");
+    }
+}
+
+function handleMenuInput() {
+    // Navigate menu with arrow keys
+    if (keyCode === UP_ARROW) {
+        menuState.selectedOption = Math.max(0, menuState.selectedOption - 1);
+    } else if (keyCode === DOWN_ARROW) {
+        menuState.selectedOption = Math.min(menuState.options.length - 1, menuState.selectedOption + 1);
+    }
+    
+    // Change difficulty for 1 Player mode
+    if (menuState.selectedOption === 0) {
+        if (keyCode === LEFT_ARROW) {
+            menuState.difficultySelected = Math.max(0, menuState.difficultySelected - 1);
+        } else if (keyCode === RIGHT_ARROW) {
+            menuState.difficultySelected = Math.min(menuState.difficulties.length - 1, menuState.difficultySelected + 1);
+        }
+    }
+    
+    // Confirm selection with ENTER
+    if (keyCode === ENTER || key === ' ') {
+        startGameWithSelection();
+    }
+}
+
+function startGameWithSelection() {
+    // Set game mode based on selection
+    if (menuState.selectedOption === 0) {
+        // 1 Player vs CPU
+        aiEnabled = true;
+        gameMode = 'vs-cpu';
+        aiState.difficulty = menuState.difficulties[menuState.difficultySelected].toLowerCase();
+    } else {
+        // 2 Player
+        aiEnabled = false;
+        gameMode = 'vs-human';
+    }
+    
+    // Start the game
+    gameState = 'playing';
+    gameStarted = false; // Will start when user presses a key
+    
+    // Reset game state
+    leftScore = 0;
+    rightScore = 0;
+    updateScore();
+    resetBall();
+    
+    // Reset input buffers
+    inputBuffer.left = 0;
+    inputBuffer.right = 0;
+    mouseInput.active = false;
+    
+    // Reset AI state
+    aiState.targetY = height / 2;
+    aiState.lastUpdateTime = 0;
+    
+    // Clear particles
+    particles = [];
+    
+    console.log(`🎮 Started ${gameMode} mode${aiEnabled ? ' - Difficulty: ' + aiState.difficulty : ''}`);
 }
 
 function keyReleased() {
@@ -747,6 +1075,11 @@ function keyReleased() {
 
 // Mouse/touch input handlers
 function mousePressed() {
+    if (gameState === 'menu') {
+        handleMenuClick();
+        return false;
+    }
+    
     // Start mouse/touch input when clicking in game area
     if (mouseX >= 0 && mouseX <= width && mouseY >= 0 && mouseY <= height) {
         mouseInput.active = true;
@@ -757,6 +1090,36 @@ function mousePressed() {
         }
         
         return false; // Prevent default behavior
+    }
+}
+
+function handleMenuClick() {
+    let startY = height/2 - 20;
+    let spacing = 60;
+    
+    // Check if clicked on menu options
+    for (let i = 0; i < menuState.options.length; i++) {
+        let y = startY + i * spacing;
+        
+        if (mouseY > y - 25 && mouseY < y + 25) {
+            if (menuState.selectedOption === i) {
+                // Double click or click on already selected - start game
+                startGameWithSelection();
+            } else {
+                // Select this option
+                menuState.selectedOption = i;
+            }
+            break;
+        }
+    }
+    
+    // Check difficulty selection area for 1 Player mode
+    if (menuState.selectedOption === 0) {
+        let diffY = startY + 28;
+        if (mouseY > diffY && mouseY < diffY + 20) {
+            // Cycle through difficulties on click
+            menuState.difficultySelected = (menuState.difficultySelected + 1) % menuState.difficulties.length;
+        }
     }
 }
 
