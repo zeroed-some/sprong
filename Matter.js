@@ -84,11 +84,6 @@ function setup() {
         leftSupport, leftPaddle, leftSpring,
         rightSupport, rightPaddle, rightSpring
     ]);
-    
-    console.log("🎮 Sprong Phase 4 Complete!");
-    console.log("✓ Enhanced player controls with acceleration");
-    console.log("✓ Smooth input buffering and movement");
-    console.log("✓ Improved visual feedback and polish");
 }
 
 function createSpringPaddleSystem(side) {
