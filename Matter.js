@@ -23,6 +23,7 @@ let gameStarted = false;
 
 // Player input
 let keys = {};
+let inputBuffer = { left: 0, right: 0 };
 
 // Canvas settings
 const CANVAS_WIDTH  = 800;
@@ -33,13 +34,23 @@ const BALL_SPEED    = 8;
 const BALL_RADIUS   = 12;
 const PADDLE_WIDTH  = 20;
 const PADDLE_HEIGHT = 80;
-const SUPPORT_SPEED = 4;
+
+// Enhanced movement constants
+const SUPPORT_SPEED     = 4.5;
+const SUPPORT_ACCEL     = 0.8;
+const INPUT_SMOOTHING   = 0.15;
+const SUPPORT_MAX_SPEED = 6;
 
 // Spring physics constants
 const PADDLE_MASS       = 0.8;
 const SPRING_LENGTH     = 40;
 const SPRING_DAMPING    = 0.8;
 const SPRING_STIFFNESS  = 0.02;
+
+// Visual enhancement constants
+const TRAIL_SEGMENTS        = 8;
+const PADDLE_GLOW_DISTANCE  = 25;
+const SPRING_GLOW_INTENSITY = 80;
 
 function setup() {
     // Create p5.js canvas
@@ -73,6 +84,11 @@ function setup() {
         leftSupport, leftPaddle, leftSpring,
         rightSupport, rightPaddle, rightSpring
     ]);
+    
+    console.log("🎮 Sprong Phase 4 Complete!");
+    console.log("✓ Enhanced player controls with acceleration");
+    console.log("✓ Smooth input buffering and movement");
+    console.log("✓ Improved visual feedback and polish");
 }
 
 function createSpringPaddleSystem(side) {
@@ -133,8 +149,8 @@ function draw() {
     // Update physics
     Engine.update(engine);
     
-    // Handle player input
-    handleInput();
+    // Handle enhanced player input
+    handleEnhancedInput();
     
     // Check for scoring
     checkBallPosition();
@@ -142,9 +158,9 @@ function draw() {
     // Clear canvas
     background(10, 10, 10);
     
-    // Draw game objects
-    drawSpringPaddleSystems();
-    drawBall();
+    // Draw game objects with enhanced visuals
+    drawSpringPaddleSystemsEnhanced();
+    drawBallEnhanced();
     drawBoundaries();
     drawCenterLine();
     
@@ -157,110 +173,205 @@ function draw() {
     }
 }
 
-function drawSpringPaddleSystems() {
-    // Draw springs first (behind paddles)
-    drawSprings();
+function handleEnhancedInput() {
+    // Smooth input accumulation with acceleration
+    let leftInput = 0;
+    let rightInput = 0;
     
-    // Draw paddles
-    fill(0, 255, 136);
-    stroke(0, 255, 136);
-    strokeWeight(2);
+    // Left paddle input (W/S keys)
+    if (keys['w'] || keys['W']) leftInput -= 1;
+    if (keys['s'] || keys['S']) leftInput += 1;
     
-    // Left paddle
-    let leftPos = leftPaddle.position;
-    let leftAngle = leftPaddle.angle;
-    push();
-    translate(leftPos.x, leftPos.y);
-    rotate(leftAngle);
-    rectMode(CENTER);
-    rect(0, 0, PADDLE_WIDTH, PADDLE_HEIGHT);
-    pop();
+    // Right paddle input (Arrow keys)
+    if (keys['ArrowUp']) rightInput -= 1;
+    if (keys['ArrowDown']) rightInput += 1;
     
-    // Right paddle
-    let rightPos = rightPaddle.position;
-    let rightAngle = rightPaddle.angle;
-    push();
-    translate(rightPos.x, rightPos.y);
-    rotate(rightAngle);
-    rectMode(CENTER);
-    rect(0, 0, PADDLE_WIDTH, PADDLE_HEIGHT);
-    pop();
+    // Apply acceleration and smoothing
+    inputBuffer.left = lerp(inputBuffer.left, leftInput, INPUT_SMOOTHING);
+    inputBuffer.right = lerp(inputBuffer.right, rightInput, INPUT_SMOOTHING);
     
-    // Draw support points (small indicators)
-    fill(0, 255, 136, 100);
-    noStroke();
-    ellipse(leftSupport.position.x, leftSupport.position.y, 8, 8);
-    ellipse(rightSupport.position.x, rightSupport.position.y, 8, 8);
+    // Move supports with enhanced physics
+    if (Math.abs(inputBuffer.left) > 0.01) {
+        moveSupportEnhanced(leftSupport, inputBuffer.left * SUPPORT_SPEED);
+    }
+    if (Math.abs(inputBuffer.right) > 0.01) {
+        moveSupportEnhanced(rightSupport, inputBuffer.right * SUPPORT_SPEED);
+    }
 }
 
-function drawSprings() {
-    stroke(0, 255, 136, 150);
-    strokeWeight(3);
+function moveSupportEnhanced(support, deltaY) {
+    let newY = support.position.y + deltaY;
     
+    // Keep support within reasonable bounds with smooth clamping
+    let minY = 50;
+    let maxY = height - 50;
+    
+    if (newY < minY) {
+        newY = minY + (newY - minY) * 0.1; // Soft boundary
+    } else if (newY > maxY) {
+        newY = maxY + (newY - maxY) * 0.1; // Soft boundary
+    }
+    
+    Body.setPosition(support, { x: support.position.x, y: newY });
+}
+
+function drawSpringPaddleSystemsEnhanced() {
+    // Draw springs with enhanced visuals
+    drawSpringsEnhanced();
+    
+    // Draw paddles with glow effects
+    drawPaddlesWithGlow();
+    
+    // Draw support points with input feedback
+    drawSupportPointsEnhanced();
+}
+
+function drawSpringsEnhanced() {
     // Left spring
     let leftSupportPos = leftSupport.position;
     let leftPaddlePos = leftPaddle.position;
-    
-    // Draw spring as a zigzag line
-    drawSpringLine(leftSupportPos, leftPaddlePos, 'left');
+    drawSpringLineEnhanced(leftSupportPos, leftPaddlePos);
     
     // Right spring
     let rightSupportPos = rightSupport.position;
     let rightPaddlePos = rightPaddle.position;
-    
-    drawSpringLine(rightSupportPos, rightPaddlePos, 'right');
+    drawSpringLineEnhanced(rightSupportPos, rightPaddlePos);
 }
 
-function drawSpringLine(startPos, endPos, side) {
-    let segments = 8;
+function drawSpringLineEnhanced(startPos, endPos) {
+    let segments = 10;
     let amplitude = 8;
     
-    // Calculate spring compression (affects visual amplitude)
+    // Calculate spring compression for visual effects
     let currentLength = dist(startPos.x, startPos.y, endPos.x, endPos.y);
     let compression = SPRING_LENGTH / currentLength;
     amplitude *= compression;
     
-    stroke(0, 255, 136, 150 + compression * 50); // Brighter when compressed
-    strokeWeight(2 + compression);
+    // Enhanced spring glow based on compression
+    let glowIntensity = 150 + compression * SPRING_GLOW_INTENSITY;
+    stroke(0, 255, 136, glowIntensity);
+    strokeWeight(2 + compression * 1.5);
+    
+    // Draw spring coil with smooth curves
+    beginShape();
+    noFill();
     
     for (let i = 0; i <= segments; i++) {
         let t = i / segments;
         let x = lerp(startPos.x, endPos.x, t);
         let y = lerp(startPos.y, endPos.y, t);
         
-        // Add zigzag offset
+        // Enhanced zigzag with smoother curves
         if (i > 0 && i < segments) {
             let perpX = -(endPos.y - startPos.y) / currentLength;
             let perpY = (endPos.x - startPos.x) / currentLength;
-            let offset = sin(i * PI) * amplitude;
+            let offset = sin(i * PI * 1.2) * amplitude;
             x += perpX * offset;
             y += perpY * offset;
         }
         
-        if (i === 0) {
-            beginShape();
-            vertex(x, y);
-        } else {
-            vertex(x, y);
-            if (i === segments) {
-                endShape();
-            }
-        }
+        vertex(x, y);
     }
+    
+    endShape();
+    
+    // Add spring glow effect
+    stroke(0, 255, 136, glowIntensity * 0.3);
+    strokeWeight(6 + compression * 2);
+    beginShape();
+    noFill();
+    
+    for (let i = 0; i <= segments; i++) {
+        let t = i / segments;
+        let x = lerp(startPos.x, endPos.x, t);
+        let y = lerp(startPos.y, endPos.y, t);
+        vertex(x, y);
+    }
+    
+    endShape();
 }
 
-function drawBall() {
-    fill(255, 100, 100);
-    stroke(255, 150, 150);
-    strokeWeight(2);
-    
+function drawPaddlesWithGlow() {
+    // Calculate ball distance for glow effects
     let ballPos = ball.position;
-    ellipse(ballPos.x, ballPos.y, BALL_RADIUS * 2, BALL_RADIUS * 2);
+    let leftDist = dist(ballPos.x, ballPos.y, leftPaddle.position.x, leftPaddle.position.y);
+    let rightDist = dist(ballPos.x, ballPos.y, rightPaddle.position.x, rightPaddle.position.y);
+    
+    // Enhanced paddle drawing
+    drawSinglePaddleEnhanced(leftPaddle, leftDist);
+    drawSinglePaddleEnhanced(rightPaddle, rightDist);
+}
+
+function drawSinglePaddleEnhanced(paddle, ballDistance) {
+    let pos = paddle.position;
+    let angle = paddle.angle;
+    
+    // Calculate glow intensity based on ball proximity
+    let glowIntensity = map(ballDistance, 0, PADDLE_GLOW_DISTANCE, 100, 0);
+    glowIntensity = constrain(glowIntensity, 0, 100);
+    
+    push();
+    translate(pos.x, pos.y);
+    rotate(angle);
+    
+    // Draw glow effect first
+    if (glowIntensity > 0) {
+        fill(0, 255, 136, glowIntensity * 0.5);
+        noStroke();
+        rectMode(CENTER);
+        rect(0, 0, PADDLE_WIDTH + 8, PADDLE_HEIGHT + 8);
+    }
+    
+    // Draw main paddle
+    fill(0, 255, 136);
+    stroke(0, 255, 136, 200 + glowIntensity);
+    strokeWeight(2);
+    rectMode(CENTER);
+    rect(0, 0, PADDLE_WIDTH, PADDLE_HEIGHT);
+    
+    pop();
+}
+
+function drawSupportPointsEnhanced() {
+    // Enhanced support indicators with input feedback
+    let leftActivity = Math.abs(inputBuffer.left) * 255;
+    let rightActivity = Math.abs(inputBuffer.right) * 255;
+    
+    // Left support
+    fill(0, 255, 136, 100 + leftActivity * 0.5);
+    noStroke();
+    ellipse(leftSupport.position.x, leftSupport.position.y, 8 + leftActivity * 0.1, 8 + leftActivity * 0.1);
+    
+    // Right support
+    fill(0, 255, 136, 100 + rightActivity * 0.5);
+    ellipse(rightSupport.position.x, rightSupport.position.y, 8 + rightActivity * 0.1, 8 + rightActivity * 0.1);
+}
+
+function drawBallEnhanced() {
+    let ballPos = ball.position;
+    let ballVel = ball.velocity;
+    let speed = Math.sqrt(ballVel.x * ballVel.x + ballVel.y * ballVel.y);
+    
+    // Enhanced ball with speed-based effects
+    let speedIntensity = map(speed, 0, 15, 50, 255);
     
     // Ball trail effect
-    fill(255, 100, 100, 50);
+    fill(255, 100, 100, 30);
     noStroke();
-    ellipse(ballPos.x, ballPos.y, BALL_RADIUS * 3, BALL_RADIUS * 3);
+    ellipse(ballPos.x, ballPos.y, BALL_RADIUS * 4, BALL_RADIUS * 4);
+    
+    // Main ball
+    fill(255, 100, 100);
+    stroke(255, 150, 150, speedIntensity);
+    strokeWeight(2 + speed * 0.1);
+    ellipse(ballPos.x, ballPos.y, BALL_RADIUS * 2, BALL_RADIUS * 2);
+    
+    // Speed indicator
+    if (speed > 10) {
+        fill(255, 255, 255, speedIntensity * 0.5);
+        noStroke();
+        ellipse(ballPos.x, ballPos.y, BALL_RADIUS, BALL_RADIUS);
+    }
 }
 
 function drawBoundaries() {
@@ -287,7 +398,7 @@ function drawDebugInfo() {
     text(`FPS: ${Math.round(frameRate())}`, 10, 20);
     text(`Ball Speed: ${Math.round(getBallSpeed())}`, 10, 35);
     
-    // Spring info
+    // Enhanced spring info
     let leftSpringLength = dist(leftSupport.position.x, leftSupport.position.y, 
                                leftPaddle.position.x, leftPaddle.position.y);
     let rightSpringLength = dist(rightSupport.position.x, rightSupport.position.y, 
@@ -295,7 +406,7 @@ function drawDebugInfo() {
     
     text(`Left Spring: ${Math.round(leftSpringLength)}px`, 10, 50);
     text(`Right Spring: ${Math.round(rightSpringLength)}px`, 10, 65);
-    text(`Spring Rest Length: ${SPRING_LENGTH}px`, 10, 80);
+    text(`Input Buffer: L=${inputBuffer.left.toFixed(2)} R=${inputBuffer.right.toFixed(2)}`, 10, 80);
 }
 
 function drawStartMessage() {
@@ -304,34 +415,7 @@ function drawStartMessage() {
     textSize(20);
     text("Press any key to start!", width/2, height/2 + 100);
     textSize(14);
-    text("Watch the springs compress and extend!", width/2, height/2 + 125);
-}
-
-function handleInput() {
-    // Left paddle (W/S keys) - move the support point
-    if (keys['w'] || keys['W']) {
-        moveSupport(leftSupport, -SUPPORT_SPEED);
-    }
-    if (keys['s'] || keys['S']) {
-        moveSupport(leftSupport, SUPPORT_SPEED);
-    }
-    
-    // Right paddle (Arrow keys) - move the support point
-    if (keys['ArrowUp']) {
-        moveSupport(rightSupport, -SUPPORT_SPEED);
-    }
-    if (keys['ArrowDown']) {
-        moveSupport(rightSupport, SUPPORT_SPEED);
-    }
-}
-
-function moveSupport(support, deltaY) {
-    let newY = support.position.y + deltaY;
-    
-    // Keep support within reasonable bounds
-    newY = constrain(newY, 50, height - 50);
-    
-    Body.setPosition(support, { x: support.position.x, y: newY });
+    text("Enhanced controls with smooth acceleration!", width/2, height/2 + 125);
 }
 
 function resetBall() {
@@ -408,6 +492,11 @@ function keyPressed() {
         updateScore();
         resetBall();
         gameStarted = false;
+        
+        // Reset input buffers
+        inputBuffer.left = 0;
+        inputBuffer.right = 0;
+        
         console.log("🔄 Game reset!");
     }
 }
