@@ -30,7 +30,7 @@ const CANVAS_WIDTH  = 800;
 const CANVAS_HEIGHT = 400;
 
 // Game constants
-const BALL_SPEED    = 8;
+const BALL_SPEED    = 6;
 const BALL_RADIUS   = 12;
 const PADDLE_WIDTH  = 20;
 const PADDLE_HEIGHT = 80;
