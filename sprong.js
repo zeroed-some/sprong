@@ -1,5 +1,5 @@
 // Matter.js module aliases
-const Body  = Matter.Body;
+const Body = Matter.Body;
 const World = Matter.World;
 const Engine = Matter.Engine;
 const Bodies = Matter.Bodies;
@@ -17,18 +17,18 @@ let leftSupport, leftPaddle, leftSpring;
 let rightSupport, rightPaddle, rightSpring;
 
 // Game state
-let gameMode    = 'vs-cpu';  // 'vs-cpu' or 'vs-human'
-let leftScore   = 0;
-let aiEnabled   = true;
-let gameState   = 'menu';   // 'menu', 'playing', 'paused'
-let rightScore  = 0;
+let leftScore = 0;
+let rightScore = 0;
 let gameStarted = false;
+let gameState = 'menu'; // 'menu', 'playing', 'paused'
+let gameMode = 'vs-cpu'; // 'vs-cpu' or 'vs-human'
+let aiEnabled = true;
 
 // Menu state
 let menuState = {
-    selectedOption: 0,        // 0 = 1 Player, 1 = 2 Player
+    selectedOption: 0, // 0 = 1 Player, 1 = 2 Player
     options: ['1 Player vs CPU', '2 Player'],
-    difficultySelected: 1,    // 0 = Easy, 1 = Medium, 2 = Hard
+    difficultySelected: 1, // 0 = Easy, 1 = Medium, 2 = Hard
     difficulties: ['Easy', 'Medium', 'Hard'],
     showDifficulty: true
 };
@@ -50,8 +50,8 @@ let aiState = {
     aggressionLevel: 0.5, // 0 = defensive, 1 = maximum aggression
     lastHitTime: 0,
     
-    // Oscillation parameters (tuned for smoother movement)
-    windupDistance: 40,   // Slightly increased from 35 with longer spring
+    // Oscillation parameters (increased for better windup)
+    windupDistance: 120,  // Much bigger - about half canvas height
     swingPower: 1.05,     // Reduced from 1.1 for more control
     timingWindow: 40,     // Slightly longer execution window
     
@@ -91,21 +91,21 @@ const PADDLE_WIDTH  = 20;
 const PADDLE_HEIGHT = 80;
 
 // Enhanced movement constants (tuned for faster response)
-const SUPPORT_SPEED     = 6.5;  // Bumped up from 4.5
-const SUPPORT_ACCEL     = 1.2;  // Increased acceleration
-const INPUT_SMOOTHING   = 0.25; // More responsive
-const SUPPORT_MAX_SPEED = 8;    // Higher max speed
+const SUPPORT_SPEED     = 6.5;    // Bumped up from 4.5
+const SUPPORT_ACCEL     = 1.2;    // Increased acceleration
+const INPUT_SMOOTHING   = 0.25;   // More responsive
+const SUPPORT_MAX_SPEED = 8;      // Higher max speed
 
 // Touch/mouse control constants
-const MOUSE_SPEED_LIMIT = 4;    // Max speed for mouse movement
-const MOUSE_LAG_FACTOR  = 0.12; // How much lag in mouse following
-const TOUCH_SENSITIVITY = 1.2;  // Touch movement multiplier
+const MOUSE_LAG_FACTOR  = 0.12;   // How much lag in mouse following
+const MOUSE_SPEED_LIMIT = 4;      // Max speed for mouse movement
+const TOUCH_SENSITIVITY = 1.2;    // Touch movement multiplier
 
 // Spring physics constants (adjusted for better oscillation)
-const PADDLE_MASS       = 0.8;  // Back to more stable value
-const SPRING_LENGTH     = 50;   // Increased from 40 for more room
-const SPRING_DAMPING    = 0.6;  // More damping = less erratic
-const SPRING_STIFFNESS  = 0.025; // Slightly lower for smoother motion
+const PADDLE_MASS       = 0.8;    // Back to more stable value
+const SPRING_LENGTH     = 50;     // Increased from 40 for more room
+const SPRING_DAMPING    = 0.6;    // More damping = less erratic
+const SPRING_STIFFNESS  = 0.025;  // Slightly lower for smoother motion
 
 // AI difficulty settings
 const AI_SETTINGS = {
@@ -178,6 +178,11 @@ function setup() {
         leftSupport, leftPaddle, leftSpring,
         rightSupport, rightPaddle, rightSpring
     ]);
+    
+    console.log("Sprong Phase 5 Complete!");
+    console.log("Particle effects system");
+    console.log("Tuned physics for maximum bounce");
+    console.log("Faster, more responsive paddles");
 }
 
 function createSpringPaddleSystem(side) {
@@ -426,77 +431,122 @@ function updateAIAggression() {
 }
 
 function handleAITracking(currentTime, ballPos, ballVel, aiSettings) {
-    // Only react if enough time has passed (reaction delay)
-    if (currentTime - aiState.lastUpdateTime < aiSettings.reactionTime) return;
-    
-    // Check if ball is approaching AI paddle
+    // Always track ball position for more responsive movement
     let ballApproaching = ballVel.x > 0;
     let ballDistance = width - ballPos.x;
     let ballSpeed = Math.sqrt(ballVel.x * ballVel.x + ballVel.y * ballVel.y);
     
-    if (ballApproaching && ballDistance < 280) {
-        // Calculate intercept point with advanced prediction
-        let timeToReach = ballDistance / Math.abs(ballVel.x);
-        aiState.interceptY = ballPos.y + ballVel.y * timeToReach;
+    // Calculate where the AI paddle currently is (not the anchor)
+    let paddlePos = rightPaddle.position;
+    let anchorPos = rightSupport.position;
+    
+    // Continuous ball tracking with paddle awareness
+    let trackingIntensity = ballApproaching ? 0.08 : 0.03;
+    
+    // Calculate where anchor should be to position PADDLE at target Y
+    let desiredPaddleY = ballPos.y + aiState.microAdjustment;
+    desiredPaddleY = constrain(desiredPaddleY, 80, height - 80);
+    
+    // Estimate anchor position needed to get paddle to desired position
+    // This is tricky because spring physics affects paddle position
+    let anchorOffsetNeeded = calculateAnchorOffset(desiredPaddleY, paddlePos, anchorPos);
+    let targetAnchorY = desiredPaddleY + anchorOffsetNeeded;
+    
+    // Always apply some level of paddle-aware tracking
+    aiState.targetY = lerp(aiState.targetY, targetAnchorY, trackingIntensity);
+    
+    // Only do advanced prediction and windup logic if enough time has passed (reaction delay)
+    if (currentTime - aiState.lastUpdateTime > aiSettings.reactionTime) {
         
-        // Account for wall bounces
-        if (aiState.interceptY < 50) {
-            aiState.interceptY = 100 - aiState.interceptY;
-        } else if (aiState.interceptY > height - 50) {
-            aiState.interceptY = 2 * (height - 50) - aiState.interceptY;
-        }
-        
-        // Add accuracy error
-        let error = (random() - 0.5) * 35 * (1 - aiSettings.accuracy);
-        aiState.interceptY += error;
-        
-        // Smart oscillation decision: lower velocity threshold and more distance
-        let shouldWindUp = ballSpeed < 7 &&           // Reduced from 9 - easier to trigger
-                          ballDistance > 160 &&       // More distance required  
-                          Math.abs(ballVel.y) < 5 &&  // Stricter vertical movement limit
-                          random() < aiSettings.oscillation * aiState.aggressionLevel;
-        
-        if (shouldWindUp) {
-            // Start winding up for power shot
-            aiState.mode = 'WINDING_UP';
-            aiState.windupStartTime = currentTime;
+        if (ballApproaching && ballDistance < 300) {
+            // Calculate intercept point with advanced prediction
+            let timeToReach = ballDistance / Math.abs(ballVel.x);
+            let predictedBallY = ballPos.y + ballVel.y * timeToReach;
             
-            // Determine windup direction (opposite of intercept)
-            let currentY = rightSupport.position.y;
-            aiState.windupDirection = aiState.interceptY > currentY ? -1 : 1;
+            // Account for wall bounces
+            if (predictedBallY < 50) {
+                predictedBallY = 100 - predictedBallY;
+            } else if (predictedBallY > height - 50) {
+                predictedBallY = 2 * (height - 50) - predictedBallY;
+            }
             
-        } else {
-            // Simple tracking without oscillation
-            aiState.targetY = aiState.interceptY;
+            // Add accuracy error
+            let error = (random() - 0.5) * 35 * (1 - aiSettings.accuracy);
+            predictedBallY += error;
+            
+            // Calculate where PADDLE needs to be to hit the ball
+            aiState.interceptY = predictedBallY;
+            
+            // Calculate where ANCHOR needs to be to position paddle correctly
+            let interceptAnchorOffset = calculateAnchorOffset(aiState.interceptY, paddlePos, anchorPos);
+            let targetAnchorForIntercept = aiState.interceptY + interceptAnchorOffset;
+            
+            // VERY selective windup decision: only for very slow balls
+            let shouldWindUp = ballSpeed < 4.5 &&         // Much stricter - very slow balls only
+                              ballDistance > 200 &&       // Lots of distance required  
+                              Math.abs(ballVel.y) < 3 &&  // Very limited vertical movement
+                              Math.abs(ballVel.x) > 1 &&  // Ball must be actually moving toward AI
+                              random() < aiSettings.oscillation * aiState.aggressionLevel * 0.3; // Much lower chance
+            
+            if (shouldWindUp) {
+                // Start winding up for power shot
+                aiState.mode = 'WINDING_UP';
+                aiState.windupStartTime = currentTime;
+                
+                // Determine windup direction (opposite of where paddle needs to be)
+                aiState.windupDirection = aiState.interceptY > paddlePos.y ? -1 : 1;
+                
+            } else {
+                // Use paddle-aware intercept positioning
+                aiState.targetY = lerp(aiState.targetY, targetAnchorForIntercept, 0.3);
+            }
+            
+            aiState.lastUpdateTime = currentTime;
         }
-        
-        aiState.lastUpdateTime = currentTime;
-    } else {
-        // When ball isn't approaching, do lifelike tracking
-        let trackingY = ballPos.y + aiState.microAdjustment;
-        trackingY = constrain(trackingY, 80, height - 80);
-        aiState.targetY = lerp(aiState.targetY, trackingY, 0.02); // Very gentle tracking
     }
+}
+
+// Helper function to estimate where anchor should be to position paddle at target Y
+function calculateAnchorOffset(targetPaddleY, currentPaddlePos, currentAnchorPos) {
+    // Calculate current spring vector
+    let springVectorY = currentPaddlePos.y - currentAnchorPos.y;
+    
+    // The paddle tends to lag behind the anchor due to spring physics
+    // We need to account for this offset when positioning
+    
+    // Simple approximation: if spring is compressed/extended, paddle will be offset
+    let currentSpringLength = dist(currentAnchorPos.x, currentAnchorPos.y, 
+                                  currentPaddlePos.x, currentPaddlePos.y);
+    let springCompression = SPRING_LENGTH - currentSpringLength;
+    
+    // Estimate the Y offset the paddle will have relative to anchor
+    // This is a simplified physics approximation
+    let estimatedPaddleOffset = springVectorY * 0.8; // Paddle lags behind anchor
+    
+    // Return the offset needed for anchor positioning
+    return -estimatedPaddleOffset;
 }
 
 function handleAIWindup(currentTime, ballPos, ballVel, aiSettings) {
     let windupTime = currentTime - aiState.windupStartTime;
-    let maxWindupTime = 350 / Math.max(aiState.aggressionLevel, 0.3); // Slower windup, minimum time
+    let maxWindupTime = 500 / Math.max(aiState.aggressionLevel, 0.3); // Longer windup for bigger movement
     
-    // Calculate windup target (move away from intercept point)
-    let currentY = rightSupport.position.y;
-    let windupTarget = currentY + aiState.windupDirection * aiState.windupDistance * aiState.aggressionLevel;
-    windupTarget = constrain(windupTarget, 70, height - 70); // More margin from edges
+    // Calculate windup target with much bigger distance
+    let paddlePos = rightPaddle.position;
+    let windupTarget = paddlePos.y + aiState.windupDirection * aiState.windupDistance * aiState.aggressionLevel;
+    windupTarget = constrain(windupTarget, 50, height - 50); // Allow closer to edges for big windup
     
-    aiState.targetY = windupTarget;
+    // Convert paddle target to anchor target using paddle awareness
+    let anchorOffsetNeeded = calculateAnchorOffset(windupTarget, paddlePos, rightSupport.position);
+    aiState.targetY = windupTarget + anchorOffsetNeeded;
     
-    // Check if it's time to swing - more conservative timing
+    // Check if it's time to swing - allow more time for bigger windups
     let ballDistance = width - ballPos.x;
     let ballSpeed = Math.sqrt(ballVel.x * ballVel.x + ballVel.y * ballVel.y);
     
     let shouldSwing = windupTime > maxWindupTime || 
-                     ballDistance < 90 || 
-                     ballSpeed > 8; // Lower threshold - abort if ball speeds up
+                     ballDistance < 120 || 
+                     ballSpeed > 6; // Abort if ball speeds up even slightly
     
     if (shouldSwing) {
         aiState.mode = 'SWINGING';
@@ -505,8 +555,12 @@ function handleAIWindup(currentTime, ballPos, ballVel, aiSettings) {
 }
 
 function handleAISwing(currentTime, ballPos, ballVel, aiSettings) {
-    // Aggressive swing toward intercept point
-    aiState.targetY = aiState.interceptY;
+    // Aggressive swing toward intercept point - but position anchor for paddle placement
+    let paddlePos = rightPaddle.position;
+    
+    // Calculate where anchor should be to get paddle to intercept point
+    let anchorOffsetNeeded = calculateAnchorOffset(aiState.interceptY, paddlePos, rightSupport.position);
+    aiState.targetY = aiState.interceptY + anchorOffsetNeeded;
     
     let swingTime = currentTime - aiState.swingStartTime;
     let maxSwingTime = aiState.timingWindow;
@@ -529,8 +583,18 @@ function handleAIRecovery(currentTime, ballPos, ballVel, aiSettings) {
 }
 
 function handleAIAnticipation(currentTime, ballPos, ballVel, aiSettings) {
-    // Stay near center with subtle lifelike movements
-    aiState.targetY = aiState.idleTarget + aiState.breathingOffset + aiState.microAdjustment;
+    // Stay near center with subtle lifelike movements, but use paddle-aware positioning
+    let baseTarget = aiState.idleTarget + aiState.breathingOffset + aiState.microAdjustment;
+    let ballTrackingTarget = ballPos.y;
+    
+    // Blend idle position with gentle ball tracking
+    let desiredPaddleY = lerp(baseTarget, ballTrackingTarget, 0.15);
+    
+    // Convert paddle target to anchor target
+    let paddlePos = rightPaddle.position;
+    let anchorPos = rightSupport.position;
+    let anchorOffsetNeeded = calculateAnchorOffset(desiredPaddleY, paddlePos, anchorPos);
+    aiState.targetY = desiredPaddleY + anchorOffsetNeeded;
     
     // Switch back to tracking when ball changes direction
     if (ballVel.x > 0) {
@@ -543,14 +607,14 @@ function executeAIMovement(aiSettings) {
     let currentY = rightSupport.position.y;
     let deltaY = aiState.targetY - currentY;
     
-    if (Math.abs(deltaY) > 2) { // Smaller dead zone for more responsive micro-movements
-        let baseSpeed = 0.06 * aiSettings.speed; // Slightly slower base movement
+    if (Math.abs(deltaY) > 1) { // Very small dead zone for responsive tracking
+        let baseSpeed = 0.08 * aiSettings.speed; // Back to more responsive speed
         
         // Apply swing power during swing phase
         if (aiState.mode === 'SWINGING') {
             baseSpeed *= aiState.swingPower * (1 + aiState.aggressionLevel * 0.3);
         } else if (aiState.mode === 'WINDING_UP') {
-            baseSpeed *= 0.7; // Slower during windup for more deliberate movement
+            baseSpeed *= 0.6; // Slower during windup for more deliberate movement
         }
         
         // Apply aggression multiplier
@@ -969,7 +1033,7 @@ function drawDebugInfo() {
         // Show AI technique indicators
         if (aiState.mode === 'WINDING_UP') {
             fill(255, 150, 50, 200);
-            text("AI WINDING UP FOR POWER SHOT", 10, 175);
+            text("🔄 AI WINDING UP FOR POWER SHOT", 10, 175);
         } else if (aiState.mode === 'SWINGING') {
             fill(255, 50, 50, 200);
             text("⚡ AI POWER SWING!", 10, 175);
@@ -1176,7 +1240,7 @@ function keyPressed() {
     if (key === 'm' || key === 'M') {
         aiEnabled = !aiEnabled;
         gameMode = aiEnabled ? 'vs-cpu' : 'vs-human';
-        console.log(`Switched to ${gameMode} mode`);
+        console.log("Switched to " + gameMode + " mode");
     }
     
     // Change AI difficulty (only during gameplay)
@@ -1188,7 +1252,7 @@ function keyPressed() {
         } else {
             aiState.difficulty = 'easy';
         }
-        console.log(`AI difficulty: ${aiState.difficulty}`);
+        console.log("AI difficulty: " + aiState.difficulty);
     }
     
     // Reset game with spacebar
@@ -1219,7 +1283,7 @@ function keyPressed() {
     }
     
     // Return to menu with ESC
-    if (keyCode === 27) { // ESC key
+    if (keyCode === 27) {
         gameState = 'menu';
         gameStarted = false;
         particles = [];
@@ -1285,7 +1349,7 @@ function startGameWithSelection() {
     // Clear particles
     particles = [];
     
-    console.log(`Started ${gameMode} mode${aiEnabled ? ' - Difficulty: ' + aiState.difficulty : ''}`);
+    console.log("Started " + gameMode + " mode" + (aiEnabled ? " - Difficulty: " + aiState.difficulty : ""));
 }
 
 function keyReleased() {
