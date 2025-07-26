@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sprong :: Pong with Physics</title>
+    <link rel="stylesheet" href="sprong.css">
+</head>
+<body>
+    <h1>SPRONG</h1>
+    <div class="score left" id="leftScore">0</div>
+    <div class="score right" id="rightScore">0</div>
+    
+    <div id="gameCanvas"></div>
+    
+    <div class="info">
+        <div>Physics-based Pong with Spring Paddles</div>
+        <div class="controls">
+            Player 1: W/S keys | Player 2: ↑/↓ arrows<br>
+        </div>
+    </div>
+
+    <!-- Load p5.js from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
+    
+    <!-- Load Matter.js from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    
+    <!-- Our game logic -->
+    <script src="sprong.js"></script>
+</body>
+</html>
