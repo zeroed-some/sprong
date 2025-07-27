@@ -49,6 +49,7 @@ let mouseInput = {
 window.inputBuffer = inputBuffer;
 window.moveSupportEnhanced = moveSupportEnhanced;
 window.ball = null;
+window.rotationState = rotationState;
 
 function setup() {
     let canvas = createCanvas(CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -125,6 +126,7 @@ function draw() {
 function handleEnhancedInput() {
     handleKeyboardInput();
     handleMouseTouchInput();
+    handleRotationInput();  // Add rotation handling
     handleBopInput(keys, aiEnabled, millis(), leftPaddle, rightPaddle, 
                    leftSupport, rightSupport, engine, particles);
     

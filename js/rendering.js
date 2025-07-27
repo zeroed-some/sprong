@@ -344,32 +344,38 @@ function drawDebugInfo(ball, leftSupport, leftPaddle, rightSupport, rightPaddle,
     text(`R Spring: ${Math.round(rightSpringLength)}px (${((SPRING_LENGTH/rightSpringLength - 1) * 100).toFixed(0)}%)`, 10, 95);
     text(`Input: L=${inputBuffer.left.toFixed(2)} R=${inputBuffer.right.toFixed(2)}`, 10, 110);
     
+    // Rotation info
+    if (window.rotationState) {
+        text(`L Rot: ${(window.rotationState.left.currentAngle * 180 / Math.PI).toFixed(1)}° (vel: ${window.rotationState.left.angularVelocity.toFixed(3)})`, 10, 125);
+        text(`R Rot: ${(window.rotationState.right.currentAngle * 180 / Math.PI).toFixed(1)}° (vel: ${window.rotationState.right.angularVelocity.toFixed(3)})`, 10, 140);
+    }
+    
     // AI debug info
     if (aiEnabled) {
-        text(`AI State: ${aiState.mode} | Aggression: ${aiState.aggressionLevel.toFixed(2)}`, 10, 125);
-        text(`Target: ${Math.round(aiState.targetY)} | Intercept: ${Math.round(aiState.interceptY)}`, 10, 140);
-        text(`Ball: (${Math.round(ball.position.x)}, ${Math.round(ball.position.y)}) Vel: (${ball.velocity.x.toFixed(1)}, ${ball.velocity.y.toFixed(1)})`, 10, 155);
+        text(`AI State: ${aiState.mode} | Aggression: ${aiState.aggressionLevel.toFixed(2)}`, 10, 155);
+        text(`Target: ${Math.round(aiState.targetY)} | Intercept: ${Math.round(aiState.interceptY)}`, 10, 170);
+        text(`Ball: (${Math.round(ball.position.x)}, ${Math.round(ball.position.y)}) Vel: (${ball.velocity.x.toFixed(1)}, ${ball.velocity.y.toFixed(1)})`, 10, 185);
         
         // AI technique indicators
         if (aiState.mode === 'WINDING_UP') {
             fill(255, 150, 50, 200);
-            text(`AI WINDING UP | Phase: ${(aiState.windupPhase % (Math.PI * 2)).toFixed(2)} | Velocity: ${aiState.currentVelocity.toFixed(1)}`, 10, 175);
+            text(`AI WINDING UP | Phase: ${(aiState.windupPhase % (Math.PI * 2)).toFixed(2)} | Velocity: ${aiState.currentVelocity.toFixed(1)}`, 10, 205);
             
             if (aiState.comboBop) {
                 fill(255, 50, 255, 200);
-                text("⚡ COMBO PLANNED!", 10, 190);
+                text("⚡ COMBO PLANNED!", 10, 220);
             }
         } else if (aiState.mode === 'SWINGING') {
             fill(255, 50, 50, 200);
-            text("AI POWER SWING!", 10, 175);
+            text("AI POWER SWING!", 10, 205);
         } else if (aiState.consideringBop) {
             fill(255, 255, 100, 200);
-            text("AI PREPARING BOP!", 10, 175);
+            text("AI PREPARING BOP!", 10, 205);
         }
         
         if (bopState.right.active) {
             fill(255, 255, 0, 255);
-            text("AI BOPPING!", 10, 190);
+            text("AI BOPPING!", 10, 220);
         }
     }
 }
@@ -382,10 +388,11 @@ function drawStartMessage(aiEnabled, aiDifficulty) {
     textSize(14);
     
     if (aiEnabled) {
-        text("Player vs CPU | Left paddle: W/S or Mouse/Touch", width/2, height/2 + 125);
+        text("Player vs CPU | Move: W/S or Mouse/Touch | Rotate: A/D | Bop: Left Shift", width/2, height/2 + 125);
         text(`AI Difficulty: ${aiDifficulty.toUpperCase()}`, width/2, height/2 + 145);
     } else {
-        text("2 Player Mode | P1: W/S | P2: ↑/↓ | Mouse/Touch: Drag paddles", width/2, height/2 + 125);
+        text("2 Player Mode | P1: W/S + A/D + L.Shift | P2: ↑/↓ + ←/→ + Enter", width/2, height/2 + 125);
+        text("Mouse/Touch: Drag paddles", width/2, height/2 + 145);
     }
     
     textSize(12);
@@ -451,9 +458,9 @@ function drawMenu(menuState) {
     textSize(12);
     fill(255, 100);
     if (menuState.selectedOption === 0) {
-        text("Controls: W/S keys + LEFT SHIFT (bop) or Mouse/Touch", width/2, height - 30);
+        text("Controls: W/S (move) + A/D (rotate) + LEFT SHIFT (bop) or Mouse/Touch", width/2, height - 30);
     } else {
-        text("Controls: P1 (W/S + L.Shift) | P2 (↑/↓ + Enter) | Mouse/Touch", width/2, height - 30);
+        text("P1: W/S + A/D + L.Shift | P2: ↑/↓ + ←/→ + Enter | Mouse/Touch", width/2, height - 30);
     }
 }
 

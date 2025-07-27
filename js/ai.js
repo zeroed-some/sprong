@@ -560,8 +560,3 @@ function executeAIMovement(aiSettings, rightSupport) {
         }
     }
 }
-
-// Utility function - should match p5.js lerp
-function lerp(start, stop, amt) {
-    return amt * (stop - start) + start;
-}

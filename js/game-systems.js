@@ -1,5 +1,4 @@
 // game-systems.js - Core game mechanics and physics
-// TODO redocument
 
 // ============= CONSTANTS =============
 // Canvas settings
@@ -48,6 +47,18 @@ const BOP_COOLDOWN          = 0;  // also also self expl.   PULL  it.
 const ANCHOR_RECOIL         = 60;   // How far the anchor moves backward during bop
 const BOP_VELOCITY_BOOST    = 5;    // Initial velocity boost for paddle
 
+// Rotation control constants
+const ROTATION_SPEED        = 0.05;  // Base rotation speed (radians per frame)
+const ROTATION_SMOOTHING    = 0.15;  // Input smoothing for rotation (0-1)
+const ROTATION_DAMPING      = 0.92;  // Angular velocity damping (0-1)
+const ROTATION_MAX_SPEED    = 0.2;   // Maximum angular velocity (radians per frame)
+const ROTATION_RESISTANCE   = 3.0;   // How much harder it is to rotate against momentum
+const ROTATION_MOMENTUM     = 0.85;  // How much angular momentum is preserved (0-1)
+const ROTATION_RETURN_FORCE = 0.02;  // Force returning paddle to neutral position
+const ROTATION_MAX_ANGLE    = Math.PI / 4; // Maximum rotation angle (45 degrees)
+const ROTATION_WITH_MOMENTUM_BOOST = 1.5;  // Speed multiplier when rotating with momentum
+const ROTATION_AGAINST_MOMENTUM_LAG = 0.05; // Lag multiplier when rotating against momentum
+
 // ============= BOP SYSTEM =============
 let bopState = {
     left: {
@@ -67,6 +78,26 @@ let bopState = {
         cooldown: BOP_COOLDOWN,
         lastBopTime: 0,
         originalPos: null
+    }
+};
+
+// ============= ROTATION SYSTEM =============
+let rotationState = {
+    left: {
+        targetAngle: 0,           // Target angle based on input
+        currentAngle: 0,          // Current visual angle
+        angularVelocity: 0,       // Current angular velocity
+        angularMomentum: 0,       // Angular momentum
+        inputBuffer: 0,           // Smoothed rotation input (-1 to 1)
+        lastDirection: 0          // Last input direction for momentum checks
+    },
+    right: {
+        targetAngle: 0,
+        currentAngle: 0,
+        angularVelocity: 0,
+        angularMomentum: 0,
+        inputBuffer: 0,
+        lastDirection: 0
     }
 };
 
@@ -357,7 +388,6 @@ function resetBall(ball, world, width, height) {
 }
 
 // ============= COLLISION =============
-// ============= COLLISION =============
 function setupCollisionHandlers(engine, ball, leftPaddle, rightPaddle, particles) {
     const Body = Matter.Body;
     
@@ -507,4 +537,88 @@ function setupCollisionHandlers(engine, ball, leftPaddle, rightPaddle, particles
             }
         }
     });
+}
+
+// ============= ROTATION SYSTEM =============
+function handleRotationInput() {
+    // Left paddle rotation (A/D keys)
+    let leftRotationInput = 0;
+    if (keys['a'] || keys['A']) leftRotationInput -= 1;
+    if (keys['d'] || keys['D']) leftRotationInput += 1;
+    
+    // Right paddle rotation (Left/Right arrows, only if AI disabled)
+    let rightRotationInput = 0;
+    if (!aiEnabled) {
+        if (keys['ArrowLeft']) rightRotationInput -= 1;
+        if (keys['ArrowRight']) rightRotationInput += 1;
+    }
+    
+    // Update rotation states
+    updateRotationPhysics('left', leftRotationInput, leftPaddle);
+    if (!aiEnabled) {
+        updateRotationPhysics('right', rightRotationInput, rightPaddle);
+    }
+}
+
+function updateRotationPhysics(side, input, paddle) {
+    const Body = Matter.Body;
+    let state = rotationState[side];
+    
+    // Smooth the input
+    state.inputBuffer = lerp(state.inputBuffer, input, ROTATION_SMOOTHING);
+    
+    // Calculate resistance based on momentum
+    let rotatingWithMomentum = (state.inputBuffer * state.angularVelocity) > 0;
+    let effectiveInput = state.inputBuffer;
+    
+    if (rotatingWithMomentum && Math.abs(state.inputBuffer) > 0.1) {
+        // Easier to rotate with momentum
+        effectiveInput *= ROTATION_WITH_MOMENTUM_BOOST;
+    } else if (!rotatingWithMomentum && Math.abs(state.inputBuffer) > 0.1) {
+        // Harder to rotate against momentum
+        effectiveInput *= ROTATION_AGAINST_MOMENTUM_LAG;
+    }
+    
+    // Apply torque based on input
+    let torque = effectiveInput * ROTATION_SPEED;
+    
+    // Update angular velocity with torque
+    state.angularVelocity += torque;
+    
+    // Apply damping
+    state.angularVelocity *= ROTATION_DAMPING;
+    
+    // Limit maximum angular velocity
+    state.angularVelocity = Math.max(-ROTATION_MAX_SPEED, 
+                                    Math.min(ROTATION_MAX_SPEED, state.angularVelocity));
+    
+    // Apply return-to-center force when no input
+    if (Math.abs(state.inputBuffer) < 0.1) {
+        let returnForce = -state.currentAngle * ROTATION_RETURN_FORCE;
+        state.angularVelocity += returnForce;
+    }
+    
+    // Update current angle
+    state.currentAngle += state.angularVelocity;
+    
+    // Limit maximum rotation angle
+    state.currentAngle = Math.max(-ROTATION_MAX_ANGLE, 
+                                 Math.min(ROTATION_MAX_ANGLE, state.currentAngle));
+    
+    // Apply rotation to the paddle body
+    Body.setAngle(paddle, state.currentAngle);
+    
+    // Update angular momentum for next frame
+    state.angularMomentum = state.angularMomentum * ROTATION_MOMENTUM + 
+                           state.angularVelocity * (1 - ROTATION_MOMENTUM);
+    
+    // Track last direction for momentum calculations
+    if (Math.abs(input) > 0.1) {
+        state.lastDirection = Math.sign(input);
+    }
+}
+
+// ============= HELPER FUNCTIONS =============
+function lerp(start, stop, amt) {
+    return amt * (stop - start) + start;
 }
