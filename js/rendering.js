@@ -350,20 +350,26 @@ function drawDebugInfo(ball, leftSupport, leftPaddle, rightSupport, rightPaddle,
         text(`Target: ${Math.round(aiState.targetY)} | Intercept: ${Math.round(aiState.interceptY)}`, 10, 140);
         text(`Ball: (${Math.round(ball.position.x)}, ${Math.round(ball.position.y)}) Vel: (${ball.velocity.x.toFixed(1)}, ${ball.velocity.y.toFixed(1)})`, 10, 155);
         
+        // AI technique indicators
         if (aiState.mode === 'WINDING_UP') {
             fill(255, 150, 50, 200);
-            text("🔄 AI WINDING UP FOR POWER SHOT", 10, 175);
+            text(`AI WINDING UP | Phase: ${(aiState.windupPhase % (Math.PI * 2)).toFixed(2)} | Velocity: ${aiState.currentVelocity.toFixed(1)}`, 10, 175);
+            
+            if (aiState.comboBop) {
+                fill(255, 50, 255, 200);
+                text("⚡ COMBO PLANNED!", 10, 190);
+            }
         } else if (aiState.mode === 'SWINGING') {
             fill(255, 50, 50, 200);
-            text("⚡ AI POWER SWING!", 10, 175);
+            text("AI POWER SWING!", 10, 175);
         } else if (aiState.consideringBop) {
             fill(255, 255, 100, 200);
-            text("💥 AI PREPARING BOP!", 10, 175);
+            text("AI PREPARING BOP!", 10, 175);
         }
         
         if (bopState.right.active) {
             fill(255, 255, 0, 255);
-            text("🚀 AI BOPPING!", 10, 190);
+            text("AI BOPPING!", 10, 190);
         }
     }
 }
