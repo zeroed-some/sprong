@@ -7,7 +7,7 @@ const CANVAS_WIDTH  = 800;
 const CANVAS_HEIGHT = 400;
 
 // Game constants
-const BALL_SPEED    = 6;
+const BALL_SPEED    = 5;
 const BALL_RADIUS   = 12;
 const PADDLE_WIDTH  = 20;
 const PADDLE_HEIGHT = 80;
@@ -41,12 +41,12 @@ const IMPACT_PARTICLES      = 8;
 const SPRING_PARTICLE_RATE  = 0.3;
 
 // Bop system constants
-const BOP_FORCE             = 1.0;  // self explanatory.      BOP   it.
-const BOP_RANGE             = 500;  // also self explanatory. TWIST it.
-const BOP_DURATION          = 300;  // traversal duration.    SHAKE it.
+const BOP_FORCE             = 0.5;  // self explanatory.      BOP   it.
+const BOP_RANGE             = 40;   // also self explanatory. TWIST it.
+const BOP_DURATION          = 900;  // traversal duration.    SHAKE it.
 const BOP_COOLDOWN          = 500;  // also also self expl.   PULL  it.
 const ANCHOR_RECOIL         = 40;   // How far the anchor moves backward during bop
-const BOP_VELOCITY_BOOST    = 12;   // Initial velocity boost for paddle
+const BOP_VELOCITY_BOOST    = 6;    // Initial velocity boost for paddle
 
 // ============= BOP SYSTEM =============
 let bopState = {
@@ -95,7 +95,6 @@ function handleBopInput(keys, aiEnabled, currentTime, leftPaddle, rightPaddle, l
 
 function activateBop(side, currentTime, paddle, support, engine, particles) {
     const Body = Matter.Body;
-    const Engine = Matter.Engine;
     
     bopState[side].active = true;
     bopState[side].startTime = currentTime;
@@ -111,8 +110,8 @@ function activateBop(side, currentTime, paddle, support, engine, particles) {
         dx /= magnitude;
         dy /= magnitude;
         
-        // Calculate anchor recoil distance
-        let anchorRecoilDistance = ANCHOR_RECOIL * 0.4;
+        // Calculate anchor recoil distance (reduced for gentler motion)
+        let anchorRecoilDistance = ANCHOR_RECOIL * 0.3; // Reduced from 0.4
         
         // Move the support BACKWARD (recoil effect)
         let newSupportX = support.position.x - dx * anchorRecoilDistance;
@@ -126,17 +125,17 @@ function activateBop(side, currentTime, paddle, support, engine, particles) {
             y: support.position.y + dy * anchorRecoilDistance 
         };
         
-        // Set paddle velocity directly for immediate forward thrust
-        let forwardSpeed = (BOP_RANGE / SPRING_LENGTH) * BOP_VELOCITY_BOOST;
+        // Set paddle velocity directly for immediate forward thrust (gentler)
+        let forwardSpeed = BOP_VELOCITY_BOOST * 0.8; // Reduced intensity
         Body.setVelocity(paddle, {
             x: paddle.velocity.x + dx * forwardSpeed,
             y: paddle.velocity.y + dy * forwardSpeed
         });
         
-        // Apply a strong forward force for continued acceleration
+        // Apply a forward force for continued acceleration (gentler)
         Body.applyForce(paddle, paddle.position, {
-            x: dx * bopState[side].power * BOP_RANGE * 0.1,
-            y: dy * bopState[side].power * BOP_RANGE * 0.1
+            x: dx * bopState[side].power * BOP_RANGE * 0.05, // Reduced from 0.1
+            y: dy * bopState[side].power * BOP_RANGE * 0.05
         });
         
         // Create particle burst for visual feedback
@@ -155,9 +154,6 @@ function activateBop(side, currentTime, paddle, support, engine, particles) {
                 type: 'impact'
             });
         }
-        
-        // Force collision detection update
-        Engine.update(engine, 0);
     }
     
     console.log(side + " player BOP!");
@@ -265,6 +261,9 @@ function createSpringPaddleSystem(side, width, height) {
         frictionAir: side === 'left' ? 0.005 : 0.008,
         isSensor: false,
         slop: 0.01,
+        // Add rotational physics
+        inertia: PADDLE_MASS * 200,  // Lower inertia = more rotation
+        frictionAngular: 0.02,       // Slight angular damping
         render: {
             fillStyle: side === 'left' ? '#00ff88' : '#ff6464'
         }
@@ -282,7 +281,10 @@ function createSpringPaddleSystem(side, width, height) {
         bodyB: paddle,
         length: SPRING_LENGTH,
         stiffness: SPRING_STIFFNESS,
-        damping: SPRING_DAMPING
+        damping: SPRING_DAMPING,
+        // Add angular stiffness to create torque from movement
+        angularStiffness: 0.01,  // Allows paddle to rotate based on spring tension
+        render: { visible: false }
     });
     
     return { support, paddle, spring };
@@ -347,8 +349,15 @@ function resetBall(ball, world, width, height) {
 }
 
 // ============= COLLISION =============
+// ============= COLLISION =============
 function setupCollisionHandlers(engine, ball, leftPaddle, rightPaddle, particles) {
     const Body = Matter.Body;
+    
+    // Track collision state to prevent double-triggering
+    let collisionState = {
+        left: { inCollision: false, lastCollisionTime: 0 },
+        right: { inCollision: false, lastCollisionTime: 0 }
+    };
     
     Matter.Events.on(engine, 'collisionStart', function(event) {
         let pairs = event.pairs;
@@ -361,37 +370,135 @@ function setupCollisionHandlers(engine, ball, leftPaddle, rightPaddle, particles
                 
                 let paddle = pair.bodyA === ball ? pair.bodyB : pair.bodyA;
                 let isLeftPaddle = paddle === leftPaddle;
+                let side = isLeftPaddle ? 'left' : 'right';
                 
+                // Prevent multiple collisions in quick succession
+                let currentTime = Date.now();
+                if (currentTime - collisionState[side].lastCollisionTime < 100) {
+                    continue; // Skip if we just had a collision
+                }
+                
+                collisionState[side].lastCollisionTime = currentTime;
+                
+                // Apply bop boost if paddle is currently bopping
                 if ((isLeftPaddle && bopState.left.active) || (!isLeftPaddle && bopState.right.active)) {
-                    let ballVel = ball.velocity;
-                    let paddleVel = paddle.velocity;
+                    // Get actual collision point from Matter.js
+                    let collision = pair.collision;
+                    let contactPoint = collision.supports[0];
                     
-                    let boostX = paddleVel.x * 0.5;
-                    let boostY = paddleVel.y * 0.5;
+                    // Check if this is a valid collision
+                    let isValidCollision = false;
                     
-                    Body.setVelocity(ball, {
-                        x: ballVel.x * 1.3 + boostX,
-                        y: ballVel.y * 1.3 + boostY
-                    });
+                    if (contactPoint) {
+                        isValidCollision = true;
+                    } else {
+                        // Fallback distance check
+                        let dx = ball.position.x - paddle.position.x;
+                        let dy = ball.position.y - paddle.position.y;
+                        let distance = Math.sqrt(dx * dx + dy * dy);
+                        let collisionThreshold = BALL_RADIUS + Math.max(PADDLE_WIDTH, PADDLE_HEIGHT)/2 + 10;
+                        isValidCollision = distance < collisionThreshold;
+                    }
                     
-                    // Create impact particles
-                    for (let j = 0; j < IMPACT_PARTICLES; j++) {
-                        let angle = Math.random() * Math.PI * 2;
-                        let speed = Math.random() * 6 + 2;
+                    if (isValidCollision) {
+                        // During bop, ALWAYS apply boost
+                        let ballVel = ball.velocity;
+                        let paddleVel = paddle.velocity;
                         
-                        particles.push({
-                            x: ball.position.x,
-                            y: ball.position.y,
-                            vx: Math.cos(angle) * speed - ballVel.x * 0.2,
-                            vy: Math.sin(angle) * speed - ballVel.y * 0.2,
-                            size: Math.random() * 4 + 2,
-                            life: PARTICLE_LIFE,
-                            maxLife: PARTICLE_LIFE,
-                            color: { r: 255, g: Math.random() * 155 + 100, b: Math.random() * 50 + 100 },
-                            type: 'impact'
-                        });
+                        // Calculate the normal collision response first
+                        let normal = collision.normal;
+                        let relativeVelocity = {
+                            x: ballVel.x - paddleVel.x,
+                            y: ballVel.y - paddleVel.y
+                        };
+                        
+                        // Calculate the velocity along the collision normal
+                        let velocityAlongNormal = relativeVelocity.x * normal.x + relativeVelocity.y * normal.y;
+                        
+                        // Only apply boost if ball is approaching paddle
+                        if (velocityAlongNormal < 0) {
+                            // Base reflection velocity (enhanced during bop)
+                            let restitution = 1.5; // Higher restitution during bop
+                            let impulse = 2 * velocityAlongNormal * restitution;
+                            
+                            // Apply the impulse
+                            let newVelX = ballVel.x - impulse * normal.x;
+                            let newVelY = ballVel.y - impulse * normal.y;
+                            
+                            // Add paddle velocity influence (more during bop)
+                            let paddleInfluence = 0.6; // Higher influence during bop
+                            newVelX += paddleVel.x * paddleInfluence;
+                            newVelY += paddleVel.y * paddleInfluence;
+                            
+                            // Add bop boost in the direction of the normal
+                            let bopBoostMagnitude = 3; // Extra boost during bop
+                            newVelX += normal.x * bopBoostMagnitude;
+                            newVelY += normal.y * bopBoostMagnitude;
+                            
+                            // Ensure minimum speed after bop
+                            let newSpeed = Math.sqrt(newVelX * newVelX + newVelY * newVelY);
+                            let minSpeed = BALL_SPEED * 1.3; // At least 30% faster than normal
+                            
+                            if (newSpeed < minSpeed) {
+                                let scale = minSpeed / newSpeed;
+                                newVelX *= scale;
+                                newVelY *= scale;
+                            }
+                            
+                            // Apply the new velocity
+                            Body.setVelocity(ball, {
+                                x: newVelX,
+                                y: newVelY
+                            });
+                            
+                            // Move ball slightly away from paddle to prevent sticking
+                            let separation = 2; // pixels
+                            Body.setPosition(ball, {
+                                x: ball.position.x + normal.x * separation,
+                                y: ball.position.y + normal.y * separation
+                            });
+                            
+                            // Create impact particles
+                            for (let j = 0; j < IMPACT_PARTICLES * 2; j++) { // More particles for bop
+                                let angle = Math.atan2(normal.y, normal.x) + (Math.random() - 0.5) * Math.PI;
+                                let speed = Math.random() * 8 + 4;
+                                
+                                particles.push({
+                                    x: contactPoint ? contactPoint.x : ball.position.x,
+                                    y: contactPoint ? contactPoint.y : ball.position.y,
+                                    vx: Math.cos(angle) * speed,
+                                    vy: Math.sin(angle) * speed,
+                                    size: Math.random() * 5 + 3,
+                                    life: PARTICLE_LIFE,
+                                    maxLife: PARTICLE_LIFE,
+                                    color: { r: 255, g: Math.random() * 155 + 100, b: 50 },
+                                    type: 'impact'
+                                });
+                            }
+                            
+                            console.log(`BOP HIT! Clean bounce. New speed: ${newSpeed.toFixed(1)}, Side: ${side}`);
+                        }
                     }
                 }
+            }
+        }
+    });
+    
+    // Reset collision state on collision end
+    Matter.Events.on(engine, 'collisionEnd', function(event) {
+        let pairs = event.pairs;
+        
+        for (let i = 0; i < pairs.length; i++) {
+            let pair = pairs[i];
+            
+            if ((pair.bodyA === ball && (pair.bodyB === leftPaddle || pair.bodyB === rightPaddle)) ||
+                (pair.bodyB === ball && (pair.bodyA === leftPaddle || pair.bodyA === rightPaddle))) {
+                
+                let paddle = pair.bodyA === ball ? pair.bodyB : pair.bodyA;
+                let isLeftPaddle = paddle === leftPaddle;
+                let side = isLeftPaddle ? 'left' : 'right';
+                
+                collisionState[side].inCollision = false;
             }
         }
     });

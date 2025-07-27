@@ -1,15 +1,21 @@
 // ai.js - AI logic and behavior
 
 // ============= AI TECHNIQUE CONSTANTS =============
-const AI_WINDUP_SPEED = 0.15;        // Base oscillation speed
-const AI_WINDUP_SMOOTHNESS = 0.92;   // Smooth transitions
-const AI_WINDUP_RADIUS = 40;         // Circular motion radius
-const AI_WINDUP_MIN_TIME = 300;      // Minimum windup duration
-const AI_WINDUP_MAX_TIME = 600;      // Maximum windup duration
-const AI_BOP_AT_PEAK_CHANCE = 0.4;   // Chance to bop at windup peak
-const AI_CIRCULAR_MOTION = 0.7;      // How circular vs linear the motion is
-const AI_MOMENTUM_CARRY = 0.85;      // How much momentum carries between moves
-const AI_PHASE_SPEED = 0.08;         // Speed of phase progression (radians per frame)
+const AI_WINDUP_SPEED       = 0.15;   // Base oscillation speed
+const AI_WINDUP_SMOOTHNESS  = 1.00;   // Smooth transitions
+const AI_WINDUP_RADIUS      = 240;    // Circular motion radius
+const AI_WINDUP_MIN_TIME    = 300;    // Minimum windup duration
+const AI_WINDUP_MAX_TIME    = 1200;   // Maximum windup duration
+const AI_BOP_AT_PEAK_CHANCE = 0.4;    // Chance to bop at windup peak
+const AI_CIRCULAR_MOTION    = 0.9;    // How circular vs linear the motion is
+const AI_MOMENTUM_CARRY     = 0.85;   // How much momentum carries between moves
+const AI_PHASE_SPEED        = 0.1;    // Speed of phase progression (radians per frame)
+
+const AI_IDLE_MOVEMENT  = 0.8;        // How much AI moves when idle
+const AI_NERVOUS_ENERGY = 0.5;        // Random fidgeting energy
+const AI_PREDICTIVE_MOVEMENT = 0.7;   // How much AI moves based on prediction
+const AI_TRACKING_AGGRESSION = 0.15;  // How aggressively AI tracks the ball
+
 
 // ============= AI SETTINGS =============
 const AI_SETTINGS = {
@@ -21,12 +27,13 @@ const AI_SETTINGS = {
         aggression: 0.2,
         oscillation: 0.3,
         bopChance: 0.25,
-        // New windup parameters
         windupSpeed: 0.1,
         windupRadius: 30,
         comboBopChance: 0.1,
         circularMotion: 0.4,
-        phaseSpeed: 0.06
+        phaseSpeed: 0.06,
+        idleMovement: 0.3,
+        trackingAggression: 0.1
     },
     medium: {
         reactionTime: 250,
@@ -36,27 +43,29 @@ const AI_SETTINGS = {
         aggression: 0.5,
         oscillation: 0.7,
         bopChance: 0.55,
-        // New windup parameters
         windupSpeed: 0.15,
         windupRadius: 40,
         comboBopChance: 0.3,
         circularMotion: 0.6,
-        phaseSpeed: 0.08
+        phaseSpeed: 0.08,
+        idleMovement: 0.5,
+        trackingAggression: 0.15
     },
     hard: {
         reactionTime: 150,
         accuracy: 0.95,
-        speed: 1.2,
-        prediction: 0.8,
-        aggression: 0.8,
+        speed: 1.3,  // Increased from 1.2
+        prediction: 0.85, // Increased from 0.8
+        aggression: 0.9,  // Increased from 0.8
         oscillation: 1.0,
         bopChance: 0.85,
-        // New windup parameters
         windupSpeed: 0.2,
-        windupRadius: 50,
+        windupRadius: 60,  // Increased from 50
         comboBopChance: 0.5,
         circularMotion: 0.8,
-        phaseSpeed: 0.1
+        phaseSpeed: 0.12,  // Increased from 0.1
+        idleMovement: 0.8,
+        trackingAggression: 0.25
     }
 };
 
@@ -148,19 +157,32 @@ function handleAI(currentTime, ball, rightPaddle, rightSupport,
 
 // ============= AI BEHAVIORS =============
 function updateAILifelikeBehavior(currentTime, height) {
-    aiState.breathingOffset = Math.sin(currentTime * 0.003) * 3;
+    let aiSettings = AI_SETTINGS[aiState.difficulty];
     
-    if (currentTime - aiState.lastMicroTime > 2000 + Math.random() * 1000) {
-        aiState.microAdjustment = (Math.random() - 0.5) * 15;
+    // More pronounced breathing motion
+    aiState.breathingOffset = Math.sin(currentTime * 0.005) * 5 * aiSettings.idleMovement;
+    
+    // More frequent micro-adjustments
+    if (currentTime - aiState.lastMicroTime > 1000 + Math.random() * 500) {
+        aiState.microAdjustment = (Math.random() - 0.5) * 30 * aiSettings.idleMovement;
         aiState.lastMicroTime = currentTime;
     }
     
-    aiState.microAdjustment *= 0.98;
+    // Slower decay for more persistent movement
+    aiState.microAdjustment *= 0.95;
+    
+    // Add "nervous energy" - small random movements
+    let nervousEnergy = (Math.random() - 0.5) * AI_NERVOUS_ENERGY * aiSettings.aggression;
+    aiState.microAdjustment += nervousEnergy;
     
     if (aiState.mode === 'ANTICIPATING' || aiState.mode === 'RECOVERING') {
         let centerY = height / 2;
-        let wanderRadius = 25;
-        aiState.idleTarget = centerY + Math.sin(currentTime * 0.002) * wanderRadius;
+        let wanderRadius = 40 * aiSettings.idleMovement; // Larger wander radius
+        aiState.idleTarget = centerY + Math.sin(currentTime * 0.003) * wanderRadius;
+        
+        // Add vertical patrol behavior
+        let patrolOffset = Math.sin(currentTime * 0.002) * 30 * aiSettings.idleMovement;
+        aiState.idleTarget += patrolOffset;
     }
 }
 
@@ -187,15 +209,33 @@ function handleAITracking(currentTime, ballPos, ballVel, aiSettings,
     let paddlePos = rightPaddle.position;
     let anchorPos = rightSupport.position;
     
-    let trackingIntensity = ballApproaching ? 0.08 : 0.03;
+    // More aggressive tracking based on difficulty
+    let trackingIntensity = ballApproaching ? 
+        (0.08 + aiSettings.trackingAggression) : 
+        (0.03 + aiSettings.trackingAggression * 0.5);
     
-    let desiredPaddleY = ballPos.y + aiState.microAdjustment;
+    // Predict where ball will be and move preemptively
+    let futureTime = 0.5; // Look ahead 0.5 seconds
+    let futureBallY = ballPos.y + ballVel.y * futureTime * 60; // 60 fps assumption
+    
+    // Blend current and future position based on difficulty
+    let targetBallY = lerp(ballPos.y, futureBallY, aiSettings.prediction);
+    
+    let desiredPaddleY = targetBallY + aiState.microAdjustment + aiState.breathingOffset;
     desiredPaddleY = Math.max(80, Math.min(height - 80, desiredPaddleY));
+    
+    // Add aggressive positioning - AI tries to "cut off" the ball
+    if (ballApproaching && aiSettings.aggression > 0.5) {
+        let aggressiveOffset = (ballVel.y > 0 ? 1 : -1) * 20 * aiSettings.aggression;
+        desiredPaddleY += aggressiveOffset;
+    }
     
     let anchorOffsetNeeded = calculateAnchorOffset(desiredPaddleY, paddlePos, anchorPos);
     let targetAnchorY = desiredPaddleY + anchorOffsetNeeded;
     
-    aiState.targetY = lerp(aiState.targetY, targetAnchorY, trackingIntensity);
+    // Faster interpolation for more responsive movement
+    aiState.targetY = lerp(aiState.targetY, targetAnchorY, trackingIntensity * 1.5);
+    
     
     // AI Bop decision logic
     if (ballApproaching && !aiState.consideringBop && !bopState.right.active) {
@@ -461,44 +501,63 @@ function executeAIMovement(aiSettings, rightSupport) {
     let currentY = rightSupport.position.y;
     let deltaY = aiState.targetY - currentY;
     
-    if (Math.abs(deltaY) > 1) {
-        let baseSpeed = 0.12 * aiSettings.speed;
+    // Lower threshold for more constant movement
+    if (Math.abs(deltaY) > 0.5) { // Reduced from 1
+        let baseSpeed = 0.15 * aiSettings.speed; // Increased from 0.12
         
         // Apply swing power during swing phase
         if (aiState.mode === 'SWINGING') {
-            baseSpeed *= aiState.swingPower * (1 + aiState.aggressionLevel * 0.3);
+            baseSpeed *= aiState.swingPower * (1 + aiState.aggressionLevel * 0.5); // Increased multiplier
             
             // Add momentum from windup if available
             if (aiState.targetVelocity > 0) {
-                baseSpeed *= (1 + aiState.targetVelocity * 0.1);
-                aiState.targetVelocity *= 0.9; // Decay momentum
+                baseSpeed *= (1 + aiState.targetVelocity * 0.15); // Increased from 0.1
+                aiState.targetVelocity *= 0.85; // Slower decay
             }
         } else if (aiState.mode === 'WINDING_UP') {
             // Enhanced windup speed based on phase and settings
             let windupSpeedMultiplier = aiSettings.windupSpeed / AI_WINDUP_SPEED;
-            baseSpeed *= (1.5 + windupSpeedMultiplier);
+            baseSpeed *= (2.0 + windupSpeedMultiplier); // Increased from 1.5
             
             // Add extra speed at peak velocity points
             if (aiState.peakReached) {
-                baseSpeed *= 1.3;
+                baseSpeed *= 1.5; // Increased from 1.3
+            }
+        } else if (aiState.mode === 'TRACKING' || aiState.mode === 'ANTICIPATING') {
+            // Add movement urgency based on ball position
+            let ball = window.ball; // Access global ball
+            if (ball && ball.velocity.x > 0) {
+                let urgency = 1 + (1 - (ball.position.x / window.width)) * aiSettings.aggression;
+                baseSpeed *= urgency;
             }
         }
         
-        // Apply aggression multiplier
-        baseSpeed *= (1 + aiState.aggressionLevel * 0.3);
+        // Apply aggression multiplier with higher impact
+        baseSpeed *= (1 + aiState.aggressionLevel * 0.5); // Increased from 0.3
         
         let movement = deltaY * baseSpeed;
-        movement = Math.max(-SUPPORT_SPEED * 1.1, Math.min(SUPPORT_SPEED * 1.1, movement));
+        
+        // Allow faster movement for hard AI
+        let maxSpeed = SUPPORT_SPEED * (1.2 + aiSettings.aggression * 0.3);
+        movement = Math.max(-maxSpeed, Math.min(maxSpeed, movement));
         
         // Import moveSupportEnhanced from game-systems
         const moveSupportEnhanced = window.moveSupportEnhanced;
         moveSupportEnhanced(rightSupport, movement, window.height);
         
         // Update input buffer for visual effects
-        window.inputBuffer.right = movement / (SUPPORT_SPEED * 1.1);
+        window.inputBuffer.right = movement / maxSpeed;
     } else {
-        // Gradually reduce input buffer when AI is not moving
-        window.inputBuffer.right *= 0.95;
+        // Even when close to target, add small movements for liveliness
+        if (aiSettings.idleMovement > 0.5) {
+            let tinyMovement = (Math.random() - 0.5) * aiSettings.idleMovement;
+            const moveSupportEnhanced = window.moveSupportEnhanced;
+            moveSupportEnhanced(rightSupport, tinyMovement, window.height);
+            window.inputBuffer.right = tinyMovement / SUPPORT_SPEED;
+        } else {
+            // Gradually reduce input buffer when AI is not moving
+            window.inputBuffer.right *= 0.9; // Slower decay for more visible movement
+        }
     }
 }
 

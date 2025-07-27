@@ -104,7 +104,6 @@ function draw() {
         // Enhanced collision detection during bops
         if (bopState.left.active || bopState.right.active) {
             Engine.update(engine, 8);
-            Engine.update(engine, 8);
         }
         
         // Draw everything
