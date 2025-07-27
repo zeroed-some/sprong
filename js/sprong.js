@@ -50,6 +50,9 @@ window.inputBuffer = inputBuffer;
 window.moveSupportEnhanced = moveSupportEnhanced;
 window.ball = null;
 window.rotationState = rotationState;
+window.rightPaddle = null;
+window.width = CANVAS_WIDTH;
+window.height = CANVAS_HEIGHT;
 
 function setup() {
     let canvas = createCanvas(CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -80,6 +83,7 @@ function setup() {
     // Create ball
     ball = resetBall(null, world, width, height);
     window.ball = ball;
+    window.rightPaddle = rightPaddle;
     
     // Add everything to the world
     World.add(world, [

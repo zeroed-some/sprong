@@ -16,6 +16,13 @@ const AI_NERVOUS_ENERGY = 0.5;        // Random fidgeting energy
 const AI_PREDICTIVE_MOVEMENT = 0.7;   // How much AI moves based on prediction
 const AI_TRACKING_AGGRESSION = 0.15;  // How aggressively AI tracks the ball
 
+// AI Rotation constants
+const AI_ROTATION_UPDATE_RATE = 150;  // How often AI reconsiders rotation (ms)
+const AI_ROTATION_SMOOTHING = 0.08;   // How smoothly AI rotates
+const AI_DEFENSIVE_ANGLE = 0.2;       // Slight angle for defensive shots
+const AI_OFFENSIVE_ANGLE = 0.4;       // Larger angle for offensive shots
+const AI_TRICK_SHOT_ANGLE = 0.6;      // Maximum angle for trick shots
+const AI_ROTATION_PREDICTION = 1.2;   // How far ahead AI predicts for rotation
 
 // ============= AI SETTINGS =============
 const AI_SETTINGS = {
@@ -33,7 +40,12 @@ const AI_SETTINGS = {
         circularMotion: 0.4,
         phaseSpeed: 0.06,
         idleMovement: 0.3,
-        trackingAggression: 0.1
+        trackingAggression: 0.1,
+        // Rotation settings
+        rotationUse: 0.2,           // How often AI uses rotation
+        rotationAccuracy: 0.5,       // How accurately AI calculates angle
+        rotationSpeed: 0.6,          // How fast AI rotates
+        rotationAnticipation: 0.3    // How well AI predicts needed angle
     },
     medium: {
         reactionTime: 200,
@@ -49,7 +61,12 @@ const AI_SETTINGS = {
         circularMotion: 0.6,
         phaseSpeed: 0.08,
         idleMovement: 0.5,
-        trackingAggression: 0.15
+        trackingAggression: 0.15,
+        // Rotation settings
+        rotationUse: 0.5,
+        rotationAccuracy: 0.7,
+        rotationSpeed: 0.8,
+        rotationAnticipation: 0.6
     },
     hard: {
         reactionTime: 100,
@@ -65,7 +82,12 @@ const AI_SETTINGS = {
         circularMotion: 0.8,
         phaseSpeed: 0.12,
         idleMovement: 0.8,
-        trackingAggression: 0.25
+        trackingAggression: 0.25,
+        // Rotation settings
+        rotationUse: 0.8,
+        rotationAccuracy: 0.9,
+        rotationSpeed: 1.0,
+        rotationAnticipation: 0.85
     }
 };
 
@@ -116,7 +138,14 @@ let aiState = {
     // AI Bop system
     consideringBop: false,
     bopDecisionTime: 0,
-    bopTiming: 200
+    bopTiming: 200,
+    
+    // AI Rotation system
+    targetRotation: 0,       // Desired rotation angle
+    rotationMode: 'NEUTRAL', // NEUTRAL, OFFENSIVE, DEFENSIVE, TRICK_SHOT
+    lastRotationUpdate: 0,   // Time of last rotation decision
+    plannedShotAngle: 0,     // Angle AI wants to send ball
+    rotationConfidence: 0    // How confident AI is in its rotation choice
 };
 
 // ============= MAIN AI HANDLER =============
@@ -129,6 +158,7 @@ function handleAI(currentTime, ball, rightPaddle, rightSupport,
     
     updateAIAggression(leftScore, rightScore);
     updateAILifelikeBehavior(currentTime, height);
+    updateAIRotation(currentTime, ball, rightPaddle, width, height, aiSettings);
     
     switch (aiState.mode) {
         case 'TRACKING':
@@ -559,4 +589,128 @@ function executeAIMovement(aiSettings, rightSupport) {
             window.inputBuffer.right *= 0.9; // Slower decay for more visible movement
         }
     }
+}
+
+// ============= AI ROTATION SYSTEM =============
+function updateAIRotation(currentTime, ball, rightPaddle, width, height, aiSettings) {
+    // Only update rotation decision periodically
+    if (currentTime - aiState.lastRotationUpdate < AI_ROTATION_UPDATE_RATE) {
+        // Still apply rotation smoothly even if not updating decision
+        applyAIRotation(aiSettings);
+        return;
+    }
+    
+    aiState.lastRotationUpdate = currentTime;
+    
+    let ballPos = ball.position;
+    let ballVel = ball.velocity;
+    let paddlePos = rightPaddle.position;
+    
+    // Check if AI should use rotation
+    if (Math.random() > aiSettings.rotationUse) {
+        aiState.rotationMode = 'NEUTRAL';
+        aiState.targetRotation = 0;
+        applyAIRotation(aiSettings);
+        return;
+    }
+    
+    // Calculate ball approach
+    let ballApproaching = ballVel.x > 0;
+    let ballDistance = width - ballPos.x;
+    let timeToReach = ballDistance / Math.abs(ballVel.x);
+    
+    // Predict where ball will be
+    let predictedBallY = ballPos.y + ballVel.y * timeToReach * AI_ROTATION_PREDICTION * aiSettings.rotationAnticipation;
+    
+    // Bounce prediction
+    if (predictedBallY < 50) {
+        predictedBallY = 100 - predictedBallY;
+    } else if (predictedBallY > height - 50) {
+        predictedBallY = 2 * (height - 50) - predictedBallY;
+    }
+    
+    // Decide rotation strategy
+    if (!ballApproaching || ballDistance > 300) {
+        // Return to neutral when ball is far
+        aiState.rotationMode = 'NEUTRAL';
+        aiState.targetRotation = 0;
+    } else if (aiState.mode === 'WINDING_UP' || aiState.mode === 'SWINGING') {
+        // Offensive rotation during power shots
+        aiState.rotationMode = 'OFFENSIVE';
+        
+        // Calculate desired shot angle
+        let targetY = height / 2; // Aim for center by default
+        
+        // Try to aim away from player
+        if (paddlePos.y < height / 2) {
+            targetY = height - 80; // Aim down
+        } else {
+            targetY = 80; // Aim up
+        }
+        
+        // Calculate required angle
+        let deltaY = targetY - paddlePos.y;
+        let desiredAngle = Math.atan2(deltaY, width - paddlePos.x) * AI_OFFENSIVE_ANGLE;
+        
+        // Add some inaccuracy based on difficulty
+        let error = (Math.random() - 0.5) * (1 - aiSettings.rotationAccuracy) * 0.5;
+        desiredAngle += error;
+        
+        // Clamp angle
+        aiState.targetRotation = Math.max(-ROTATION_MAX_ANGLE, Math.min(ROTATION_MAX_ANGLE, desiredAngle));
+        
+    } else if (aiState.consideringBop || bopState.right.active) {
+        // Trick shot rotation during bop
+        aiState.rotationMode = 'TRICK_SHOT';
+        
+        // More extreme angles for bop shots
+        let trickDirection = (paddlePos.y < height / 2) ? 1 : -1;
+        aiState.targetRotation = trickDirection * AI_TRICK_SHOT_ANGLE * aiSettings.rotationAccuracy;
+        
+    } else if (Math.abs(predictedBallY - paddlePos.y) < 30) {
+        // Defensive slight angle when ball is coming straight
+        aiState.rotationMode = 'DEFENSIVE';
+        
+        // Slight angle to control return
+        let defensiveDirection = (predictedBallY < height / 2) ? -1 : 1;
+        aiState.targetRotation = defensiveDirection * AI_DEFENSIVE_ANGLE * aiSettings.rotationAccuracy;
+        
+    } else {
+        // Normal tracking
+        aiState.rotationMode = 'NEUTRAL';
+        aiState.targetRotation = 0;
+    }
+    
+    // Apply rotation confidence based on AI state
+    aiState.rotationConfidence = aiSettings.rotationAccuracy;
+    if (aiState.mode === 'RECOVERING') {
+        aiState.rotationConfidence *= 0.5; // Less confident when recovering
+    }
+    
+    applyAIRotation(aiSettings);
+}
+
+function applyAIRotation(aiSettings) {
+    // Get current rotation state
+    let rotState = window.rotationState.right;
+    
+    // Calculate rotation input needed
+    let angleDiff = aiState.targetRotation - rotState.currentAngle;
+    let rotationInput = 0;
+    
+    if (Math.abs(angleDiff) > 0.05) {
+        // Determine rotation direction
+        rotationInput = Math.sign(angleDiff);
+        
+        // Scale by AI rotation speed and confidence
+        rotationInput *= aiSettings.rotationSpeed * aiState.rotationConfidence;
+        
+        // Add some imperfection for easier difficulties
+        if (aiSettings.rotationAccuracy < 0.8) {
+            rotationInput += (Math.random() - 0.5) * 0.2 * (1 - aiSettings.rotationAccuracy);
+        }
+    }
+    
+    // Update rotation physics for AI paddle
+    updateRotationPhysics('right', rotationInput, window.rightPaddle);
 }
