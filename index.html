@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sprong :: Pong with Physick</title>
+    <title>Sprong :: Physics-based Pong</title>
     <link rel="stylesheet" href="sprong.css">
 </head>
 <body>
@@ -16,7 +16,8 @@
     <div class="info">
         <div>Physics-based Pong with Spring Paddles</div>
         <div class="controls">
-            Player 1: W/S keys | Player 2: ↑/↓ arrows<br>
+            Player 1: W/S + Left Shift (bop) | Player 2: ↑/↓ + Enter (bop)<br>
+            Mouse/Touch: Drag paddles | ESC: Menu | Space: Reset
         </div>
     </div>
 
@@ -26,7 +27,10 @@
     <!-- Load Matter.js from CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     
-    <!-- Our game logic -->
-    <script src="sprong.js"></script>
+    <!-- Load our game files, don't forget order matters -->
+    <script src="js/game-systems.js"></script>
+    <script src="js/ai.js"></script>
+    <script src="js/rendering.js"></script>
+    <script src="js/sprong.js"></script>
 </body>
 </html>
