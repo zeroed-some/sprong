@@ -17,7 +17,7 @@ const PADDLE_WIDTH  = 20;
 const PADDLE_HEIGHT = 80;
 
 // Enhanced movement constants (tuned for faster response)
-const SUPPORT_SPEED     = 6.5;  // Bumped up
+const SUPPORT_SPEED     = 6.5;  // Bumped up from 4.5
 const SUPPORT_ACCEL     = 1.2;  // Increased acceleration
 const INPUT_SMOOTHING   = 0.25; // More responsive
 const SUPPORT_MAX_SPEED = 8;    // Higher max speed
@@ -35,22 +35,22 @@ const SPRING_STIFFNESS  = 0.025;
 
 // Visual enhancement constants
 const TRAIL_SEGMENTS        = 8;
-const PADDLE_GLOW_DISTANCE  = 25;
-const SPRING_GLOW_INTENSITY = 120; // More intense glow
+const PADDLE_GLOW_DISTANCE  = 25;   // self explanatory
+const SPRING_GLOW_INTENSITY = 120;  // self explanatory. so why add a comment? because I'm anal.
 
 // Particle system constants
-const MAX_PARTICLES         = 100;
-const PARTICLE_LIFE         = 60;
-const IMPACT_PARTICLES      = 8;
-const SPRING_PARTICLE_RATE  = 0.3;
+const MAX_PARTICLES         = 100;  // dont get carried away    
+const PARTICLE_LIFE         = 60;   // dont get carried away
+const IMPACT_PARTICLES      = 8;    // dont get carried away
+const SPRING_PARTICLE_RATE  = 0.3;  // get carried away.
 
 // Bop system constants
-const BOP_FORCE             = 1.0;
-const BOP_DURATION          = 300;
-const BOP_COOLDOWN          = 500;
-const ANCHOR_RECOIL         = 40;     // How far the anchor moves backward during bop
-const BOP_RANGE             = 600;    // How far the paddle can thrust forward
-const BOP_VELOCITY_BOOST    = 12;     // Initial velocity boost for paddle
+const BOP_FORCE             = 1.0;  // self explanatory.      BOP   it.
+const BOP_RANGE             = 50;   // also self explanatory. TWIST it.
+const BOP_DURATION          = 300;  // traversal duration.    SHAKE it.
+const BOP_COOLDOWN          = 500;  // also also self expl.   PULL  it.
+const ANCHOR_RECOIL         = 40;   // How far the anchor moves backward during bop
+const BOP_VELOCITY_BOOST    = 12;   // Initial velocity boost for paddle
 
 // Game variables
 let ball;
@@ -351,7 +351,8 @@ const AI_SETTINGS = {
         speed: 0.8,           // Increased from 0.6
         prediction: 0.3,      // 30% prediction vs reaction
         aggression: 0.2,      // Low aggression
-        oscillation: 0.3      // Minimal oscillation
+        oscillation: 0.3,     // Minimal oscillation
+        bopChance: 0.25       // 25% chance to bop when in range
     },
     medium: {
         reactionTime: 250,
@@ -359,7 +360,8 @@ const AI_SETTINGS = {
         speed: 1.0,           // Increased from 0.8
         prediction: 0.6,
         aggression: 0.5,      // Moderate aggression
-        oscillation: 0.7      // Good oscillation technique
+        oscillation: 0.7,     // Good oscillation technique
+        bopChance: 0.55       // 55% chance to bop when in range
     },
     hard: {
         reactionTime: 150,
@@ -367,7 +369,8 @@ const AI_SETTINGS = {
         speed: 1.2,           // Increased from 1.0 
         prediction: 0.8,
         aggression: 0.8,      // High aggression
-        oscillation: 1.0      // Master-level oscillation
+        oscillation: 1.0,     // Master-level oscillation
+        bopChance: 0.85       // 85% chance to bop when in range
     }
 };
 
@@ -744,33 +747,64 @@ function handleAITracking(currentTime, ballPos, ballVel, aiSettings) {
     aiState.targetY = lerp(aiState.targetY, targetAnchorY, trackingIntensity);
     
     // AI Bop decision logic
-    if (ballApproaching && ballDistance < 150 && !aiState.consideringBop) {
-        // Consider bopping if ball is close and conditions are right
-        let shouldConsiderBop = ballSpeed > 8 &&  // Fast incoming ball
-                               Math.abs(ballVel.y) < 4 &&  // Not too much vertical movement
-                               random() < aiSettings.aggression * 0.4; // Chance based on aggression
+    if (ballApproaching && !aiState.consideringBop && !bopState.right.active) {
+        // Calculate if ball will be within bop range
+        let timeToReach = ballDistance / Math.abs(ballVel.x);
+        let predictedBallY = ballPos.y + ballVel.y * timeToReach;
+        
+        // Account for wall bounces in prediction
+        if (predictedBallY < 50) {
+            predictedBallY = 100 - predictedBallY;
+        } else if (predictedBallY > height - 50) {
+            predictedBallY = 2 * (height - 50) - predictedBallY;
+        }
+        
+        // Check if paddle will be close enough to ball for effective bop
+        let paddleY = rightPaddle.position.y;
+        let distanceToIntercept = Math.abs(predictedBallY - paddleY);
+        
+        // Bop is effective if paddle is within a reasonable range of the ball
+        let bopEffectiveRange = PADDLE_HEIGHT / 2 + 30; // Paddle can reach ball with bop
+        
+        // Consider bopping if:
+        // 1. Ball is approaching at good speed
+        // 2. Ball will be within bop effective range
+        // 3. Ball is at the right distance for timing
+        // 4. Random chance based on difficulty
+        let shouldConsiderBop = ballSpeed > 5 &&  // Minimum speed worth bopping
+                               distanceToIntercept < bopEffectiveRange &&
+                               ballDistance > 80 && ballDistance < 200 && // Sweet spot for bop timing
+                               currentTime - bopState.right.lastBopTime > BOP_COOLDOWN &&
+                               random() < aiSettings.bopChance; // Difficulty-based chance
         
         if (shouldConsiderBop) {
             aiState.consideringBop = true;
             aiState.bopDecisionTime = currentTime;
+            // Adjust bop timing based on ball speed and distance
+            aiState.bopTiming = Math.max(50, Math.min(200, ballDistance * 2 - ballSpeed * 10));
         }
     }
     
     // Execute bop at the right moment
     if (aiState.consideringBop && ballApproaching) {
         let timeToBop = currentTime - aiState.bopDecisionTime;
+        let paddleY = rightPaddle.position.y;
+        let distanceToBall = Math.abs(ballPos.y - paddleY);
+        
+        // Refined bop execution conditions
         let shouldBop = timeToBop > aiState.bopTiming && 
-                       ballDistance < 100 && 
-                       !bopState.right.active &&
-                       currentTime - bopState.right.lastBopTime > BOP_COOLDOWN;
+                       ballDistance < 150 && // Close enough
+                       distanceToBall < PADDLE_HEIGHT / 2 + 20 && // Paddle can reach ball
+                       !bopState.right.active;
         
         if (shouldBop) {
             activateBop('right', currentTime);
             aiState.consideringBop = false;
+            console.log(`AI BOP! Difficulty: ${aiState.difficulty}, Speed: ${ballSpeed.toFixed(1)}`);
         }
         
-        // Cancel bop consideration if ball gets too far
-        if (ballDistance > 150) {
+        // Cancel bop if opportunity missed
+        if (ballDistance > 200 || ballDistance < 50) {
             aiState.consideringBop = false;
         }
     }
@@ -1209,7 +1243,7 @@ function drawSinglePaddleEnhanced(paddle, ballDistance) {
     if (isLeft && bopState.left.active) {
         let bopProgress = (millis() - bopState.left.startTime) / bopState.left.duration;
         bopGlow = (1 - bopProgress) * 100; // Fade out over bop duration
-    } else if (!isLeft && !isAI && bopState.right.active) {
+    } else if (!isLeft && bopState.right.active) {
         let bopProgress = (millis() - bopState.right.startTime) / bopState.right.duration;
         bopGlow = (1 - bopProgress) * 100;
     }
@@ -1244,8 +1278,14 @@ function drawSinglePaddleEnhanced(paddle, ballDistance) {
     }
     
     // Bop color override
-    if ((isLeft && bopState.left.active) || (!isLeft && !isAI && bopState.right.active)) {
+    if ((isLeft && bopState.left.active) || (!isLeft && bopState.right.active)) {
         paddleColor = [255, 255, 100]; // Bright yellow during bop
+        
+        // Special effect for AI bop
+        if (isAI && bopState.right.active) {
+            paddleColor = [255, 50, 255]; // Purple for AI bop
+            glowIntensity = Math.min(255, glowIntensity + 50); // Extra glow
+        }
     }
     
     // Draw enhanced glow effect first
@@ -1389,6 +1429,15 @@ function drawDebugInfo() {
         } else if (aiState.mode === 'SWINGING') {
             fill(255, 50, 50, 200);
             text("⚡ AI POWER SWING!", 10, 175);
+        } else if (aiState.consideringBop) {
+            fill(255, 255, 100, 200);
+            text("💥 AI PREPARING BOP!", 10, 175);
+        }
+        
+        // Bop status
+        if (bopState.right.active) {
+            fill(255, 255, 0, 255);
+            text("🚀 AI BOPPING!", 10, 190);
         }
     }
     
