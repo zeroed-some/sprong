@@ -41,11 +41,11 @@ const IMPACT_PARTICLES      = 8;
 const SPRING_PARTICLE_RATE  = 0.3;
 
 // Bop system constants
-const BOP_FORCE             = 0.2;  // self explanatory.      BOP   it.
-const BOP_RANGE             = 40;   // also self explanatory. TWIST it.
-const BOP_DURATION          = 1500; // traversal duration.    SHAKE it.
-const BOP_COOLDOWN          = 500;  // also also self expl.   PULL  it.
-const ANCHOR_RECOIL         = 40;   // How far the anchor moves backward during bop
+const BOP_FORCE             = 1.0;  // self explanatory.      BOP   it.
+const BOP_RANGE             = 500;   // also self explanatory. TWIST it.
+const BOP_DURATION          = 1000; // traversal duration.    SHAKE it.
+const BOP_COOLDOWN          = 0;  // also also self expl.   PULL  it.
+const ANCHOR_RECOIL         = 60;   // How far the anchor moves backward during bop
 const BOP_VELOCITY_BOOST    = 5;    // Initial velocity boost for paddle
 
 // ============= BOP SYSTEM =============
@@ -74,8 +74,9 @@ function handleBopInput(keys, aiEnabled, currentTime, leftPaddle, rightPaddle, l
     // Left player bop - use Left Shift for both modes
     let leftBopPressed = keys['Shift'] && !keys['Control'];
     
+    // BOP_COOLDOWN controls the minimum time between bops
     if (leftBopPressed && !bopState.left.active && 
-        currentTime - bopState.left.lastBopTime > bopState.left.cooldown) {
+        currentTime - bopState.left.lastBopTime > BOP_COOLDOWN) {
         activateBop('left', currentTime, leftPaddle, leftSupport, engine, particles);
     }
     
@@ -83,8 +84,9 @@ function handleBopInput(keys, aiEnabled, currentTime, leftPaddle, rightPaddle, l
     if (!aiEnabled) {
         let rightBopPressed = keys['Enter'];
         
+        // BOP_COOLDOWN controls the minimum time between bops
         if (rightBopPressed && !bopState.right.active && 
-            currentTime - bopState.right.lastBopTime > bopState.right.cooldown) {
+            currentTime - bopState.right.lastBopTime > BOP_COOLDOWN) {
             activateBop('right', currentTime, rightPaddle, rightSupport, engine, particles);
         }
     }
@@ -109,32 +111,35 @@ function activateBop(side, currentTime, paddle, support, engine, particles) {
     if (magnitude > 0) {
         dx /= magnitude;
         dy /= magnitude;
-        // Calculate anchor recoil distance
-        let anchorRecoilDistance = ANCHOR_RECOIL * 0.3;
+        
+        // ANCHOR_RECOIL now properly controls the recoil distance
+        let anchorRecoilDistance = ANCHOR_RECOIL * 0.3; // Can adjust the 0.3 multiplier
 
-        // Move support and paddle in one solver step (no teleport → no ghost collisions)
+        // Move support and paddle backward together
         Body.translate(support, { x: -dx * anchorRecoilDistance, y: -dy * anchorRecoilDistance });
         Body.translate(paddle,  { x: -dx * anchorRecoilDistance, y: -dy * anchorRecoilDistance });
 
         // Remember where the support started so we can ease it back later
-        const preSupportPos = { x: support.position.x + dx * anchorRecoilDistance,
-                                y: support.position.y + dy * anchorRecoilDistance };
-        bopState[side].originalPos = preSupportPos;
+        bopState[side].originalPos = { 
+            x: support.position.x + dx * anchorRecoilDistance,
+            y: support.position.y + dy * anchorRecoilDistance 
+        };
         
-        // Now apply forward thrust from this new position
-        let forwardSpeed = BOP_VELOCITY_BOOST * 1.0; // Restored to full power
+        // BOP_VELOCITY_BOOST controls the initial forward velocity
+        let forwardSpeed = BOP_VELOCITY_BOOST;
         Body.setVelocity(paddle, {
             x: paddle.velocity.x + dx * forwardSpeed,
             y: paddle.velocity.y + dy * forwardSpeed
         });
 
-        // Apply a forward force for continued acceleration
+        // BOP_FORCE controls the sustained forward thrust
+        // Combined with BOP_RANGE for the total force applied
         Body.applyForce(paddle, paddle.position, {
-            x: dx * bopState[side].power * BOP_RANGE * 0.08,
-            y: dy * bopState[side].power * BOP_RANGE * 0.08
+            x: dx * BOP_FORCE * BOP_RANGE * 0.002,  // Scaled down for Matter.js
+            y: dy * BOP_FORCE * BOP_RANGE * 0.002
         });
 
-        // Create particle burst for visual feedback at the support position
+        // Create particle burst for visual feedback
         for (let i = 0; i < 5; i++) {
             let angle = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.5;
             let speed = Math.random() * 4 + 2;
@@ -152,7 +157,7 @@ function activateBop(side, currentTime, paddle, support, engine, particles) {
         }
     }
     
-    console.log(side + " player BOP!");
+    console.log(`${side} player BOP! Duration: ${BOP_DURATION}ms, Cooldown: ${BOP_COOLDOWN}ms`);
 }
 
 function updateBopStates(currentTime, leftSupport, rightSupport, leftPaddle, rightPaddle) {
@@ -161,11 +166,12 @@ function updateBopStates(currentTime, leftSupport, rightSupport, leftPaddle, rig
     // Update left bop
     if (bopState.left.active) {
         let elapsed = currentTime - bopState.left.startTime;
-        let progress = elapsed / bopState.left.duration;
+        let progress = elapsed / BOP_DURATION;  // BOP_DURATION controls how long the effect lasts
         
         if (progress >= 1.0) {
             bopState.left.active = false;
             bopState.left.originalPos = null;
+            console.log("Left bop ended after", elapsed, "ms");
         } else {
             if (bopState.left.originalPos) {
                 let support = leftSupport;
@@ -187,11 +193,12 @@ function updateBopStates(currentTime, leftSupport, rightSupport, leftPaddle, rig
     // Update right bop (same logic)
     if (bopState.right.active) {
         let elapsed = currentTime - bopState.right.startTime;
-        let progress = elapsed / bopState.right.duration;
+        let progress = elapsed / BOP_DURATION;  // BOP_DURATION controls how long the effect lasts
         
         if (progress >= 1.0) {
             bopState.right.active = false;
             bopState.right.originalPos = null;
+            console.log("Right bop ended after", elapsed, "ms");
         } else {
             if (bopState.right.originalPos) {
                 let support = rightSupport;
@@ -216,6 +223,7 @@ function limitBopRange(support, paddle) {
     let currentDistance = dist(support.position.x, support.position.y,
                               paddle.position.x, paddle.position.y);
     
+    // BOP_RANGE controls the maximum extension allowed
     let maxDistance = SPRING_LENGTH + BOP_RANGE;
     if (currentDistance > maxDistance) {
         let dx = paddle.position.x - support.position.x;
@@ -225,11 +233,14 @@ function limitBopRange(support, paddle) {
         dx /= magnitude;
         dy /= magnitude;
         
+        // Clamp paddle position to max range
         let newX = support.position.x + dx * maxDistance;
         let newY = support.position.y + dy * maxDistance;
         
         let currentVel = paddle.velocity;
         Body.setPosition(paddle, { x: newX, y: newY });
+        
+        // Dampen velocity when hitting the range limit
         Body.setVelocity(paddle, { 
             x: currentVel.x * 0.7, 
             y: currentVel.y * 0.7 
