@@ -1,5 +1,16 @@
 // ai.js - AI logic and behavior
 
+// ============= AI TECHNIQUE CONSTANTS =============
+const AI_WINDUP_SPEED = 0.15;        // Base oscillation speed
+const AI_WINDUP_SMOOTHNESS = 0.92;   // Smooth transitions
+const AI_WINDUP_RADIUS = 40;         // Circular motion radius
+const AI_WINDUP_MIN_TIME = 300;      // Minimum windup duration
+const AI_WINDUP_MAX_TIME = 600;      // Maximum windup duration
+const AI_BOP_AT_PEAK_CHANCE = 0.4;   // Chance to bop at windup peak
+const AI_CIRCULAR_MOTION = 0.7;      // How circular vs linear the motion is
+const AI_MOMENTUM_CARRY = 0.85;      // How much momentum carries between moves
+const AI_PHASE_SPEED = 0.08;         // Speed of phase progression (radians per frame)
+
 // ============= AI SETTINGS =============
 const AI_SETTINGS = {
     easy: {
@@ -9,7 +20,13 @@ const AI_SETTINGS = {
         prediction: 0.3,
         aggression: 0.2,
         oscillation: 0.3,
-        bopChance: 0.25
+        bopChance: 0.25,
+        // New windup parameters
+        windupSpeed: 0.1,
+        windupRadius: 30,
+        comboBopChance: 0.1,
+        circularMotion: 0.4,
+        phaseSpeed: 0.06
     },
     medium: {
         reactionTime: 250,
@@ -18,7 +35,13 @@ const AI_SETTINGS = {
         prediction: 0.6,
         aggression: 0.5,
         oscillation: 0.7,
-        bopChance: 0.55
+        bopChance: 0.55,
+        // New windup parameters
+        windupSpeed: 0.15,
+        windupRadius: 40,
+        comboBopChance: 0.3,
+        circularMotion: 0.6,
+        phaseSpeed: 0.08
     },
     hard: {
         reactionTime: 150,
@@ -27,7 +50,13 @@ const AI_SETTINGS = {
         prediction: 0.8,
         aggression: 0.8,
         oscillation: 1.0,
-        bopChance: 0.85
+        bopChance: 0.85,
+        // New windup parameters
+        windupSpeed: 0.2,
+        windupRadius: 50,
+        comboBopChance: 0.5,
+        circularMotion: 0.8,
+        phaseSpeed: 0.1
     }
 };
 
@@ -48,7 +77,22 @@ let aiState = {
     aggressionLevel: 0.5,
     lastHitTime: 0,
     
-    // Oscillation parameters
+    // Enhanced windup system
+    windupPhase: 0,          // 0 to 2π for circular motion
+    windupVelocity: 0,       // Current oscillation speed
+    windupMomentum: {x: 0, y: 0}, // Momentum vector
+    windupCenter: 200,       // Center point of circular motion
+    peakReached: false,      // Track if we hit peak velocity
+    comboBop: false,         // Planning windup+bop combo
+    maxVelocityPhase: 0,     // Phase where max velocity occurs
+    
+    // Motion tracking
+    lastPositions: [],       // Track last N positions for smoothing
+    currentVelocity: 0,      // Actual paddle velocity
+    targetVelocity: 0,       // Desired paddle velocity
+    smoothedTarget: 200,     // Smoothed target position
+    
+    // Original oscillation parameters (keeping for compatibility)
     windupDistance: 120,
     swingPower: 1.05,
     timingWindow: 40,
@@ -182,25 +226,48 @@ function handleAITracking(currentTime, ballPos, ballVel, aiSettings,
         }
     }
     
-    // Execute bop
+    // Execute bop at the right moment
     if (aiState.consideringBop && ballApproaching) {
         let timeToBop = currentTime - aiState.bopDecisionTime;
         let paddleY = rightPaddle.position.y;
         let distanceToBall = Math.abs(ballPos.y - paddleY);
         
+        // Refined bop execution conditions
         let shouldBop = timeToBop > aiState.bopTiming && 
-                       ballDistance < 150 &&
-                       distanceToBall < PADDLE_HEIGHT / 2 + 20 &&
+                       ballDistance < 150 && // Close enough
+                       distanceToBall < PADDLE_HEIGHT / 2 + 20 && // Paddle can reach ball
                        !bopState.right.active;
+        
+        // Special handling for combo bops during windup
+        if (aiState.comboBop && aiState.mode === 'WINDING_UP') {
+            // Execute bop at peak velocity during windup
+            shouldBop = shouldBop || (aiState.peakReached && 
+                                     ballDistance < 180 && 
+                                     distanceToBall < PADDLE_HEIGHT / 2 + 30);
+        }
         
         if (shouldBop) {
             activateBop('right', currentTime, rightPaddle, rightSupport, engine, particles);
             aiState.consideringBop = false;
-            console.log(`AI BOP! Difficulty: ${aiState.difficulty}, Speed: ${ballSpeed.toFixed(1)}`);
+            
+            if (aiState.comboBop) {
+                console.log(`AI COMBO BOP! Phase: ${(aiState.windupPhase % (Math.PI * 2)).toFixed(2)}, Velocity: ${aiState.currentVelocity.toFixed(1)}`);
+                aiState.comboBop = false;
+                
+                // Transition to swing after combo
+                if (aiState.mode === 'WINDING_UP') {
+                    aiState.mode = 'SWINGING';
+                    aiState.swingStartTime = currentTime;
+                }
+            } else {
+                console.log(`AI BOP! Difficulty: ${aiState.difficulty}, Speed: ${ballSpeed.toFixed(1)}`);
+            }
         }
         
+        // Cancel bop if opportunity missed
         if (ballDistance > 200 || ballDistance < 50) {
             aiState.consideringBop = false;
+            aiState.comboBop = false;
         }
     }
     
@@ -232,8 +299,20 @@ function handleAITracking(currentTime, ballPos, ballVel, aiSettings,
                               Math.random() < aiSettings.oscillation * aiState.aggressionLevel * 0.3;
             
             if (shouldWindUp) {
+                // Start winding up for power shot
                 aiState.mode = 'WINDING_UP';
                 aiState.windupStartTime = currentTime;
+                
+                // Initialize circular windup
+                aiState.windupCenter = paddlePos.y; // Start from current position
+                aiState.windupPhase = 0;
+                aiState.windupMomentum = {x: 0, y: 0};
+                aiState.smoothedTarget = paddlePos.y;
+                aiState.lastPositions = [paddlePos.y];
+                aiState.peakReached = false;
+                aiState.comboBop = false;
+                
+                // Determine initial direction based on intercept position
                 aiState.windupDirection = aiState.interceptY > paddlePos.y ? -1 : 1;
             } else {
                 aiState.targetY = lerp(aiState.targetY, targetAnchorForIntercept, 0.3);
@@ -247,34 +326,86 @@ function handleAITracking(currentTime, ballPos, ballVel, aiSettings,
 function handleAIWindup(currentTime, ballPos, ballVel, aiSettings, 
                        rightPaddle, rightSupport, height, width) {
     let windupTime = currentTime - aiState.windupStartTime;
-    let maxWindupTime = 800;
-    let timeProgress = Math.min(windupTime / maxWindupTime, 1.0);
+    let maxWindupTime = AI_WINDUP_MIN_TIME + (AI_WINDUP_MAX_TIME - AI_WINDUP_MIN_TIME) * aiState.aggressionLevel;
     
-    let easedProgress = timeProgress < 0.5 
-        ? 2 * timeProgress * timeProgress 
-        : 1 - Math.pow(-2 * timeProgress + 2, 3) / 2;
+    // Update windup phase for circular motion
+    let phaseSpeed = aiSettings.phaseSpeed * (1 + aiState.aggressionLevel * 0.5);
+    aiState.windupPhase += phaseSpeed;
     
-    aiState.windupProgress = easedProgress;
+    // Calculate circular motion with momentum
+    let radius = aiSettings.windupRadius * aiState.aggressionLevel;
+    let circularBlend = aiSettings.circularMotion;
     
-    let windupTargetY = aiState.interceptY + aiState.windupDirection * 
-                       aiState.windupDistance * aiState.aggressionLevel * easedProgress;
-    windupTargetY = Math.max(50, Math.min(height - 50, windupTargetY));
+    // Pure circular motion components
+    let circularX = Math.sin(aiState.windupPhase) * radius * 0.3; // Slight X movement
+    let circularY = Math.cos(aiState.windupPhase) * radius;
     
-    let anchorOffsetNeeded = calculateAnchorOffset(windupTargetY, rightPaddle.position, rightSupport.position);
-    aiState.targetY = windupTargetY + anchorOffsetNeeded;
+    // Add momentum for more natural motion
+    let targetDeltaY = circularY - (aiState.smoothedTarget - aiState.windupCenter);
+    aiState.windupMomentum.y = aiState.windupMomentum.y * AI_MOMENTUM_CARRY + targetDeltaY * (1 - AI_MOMENTUM_CARRY);
     
+    // Calculate the target position with smooth circular motion
+    let windupTargetY = aiState.windupCenter + aiState.windupMomentum.y;
+    
+    // Smooth the target for more fluid motion
+    aiState.smoothedTarget = aiState.smoothedTarget * AI_WINDUP_SMOOTHNESS + 
+                            windupTargetY * (1 - AI_WINDUP_SMOOTHNESS);
+    
+    // Keep within bounds
+    aiState.smoothedTarget = Math.max(50, Math.min(height - 50, aiState.smoothedTarget));
+    
+    // Convert paddle target to anchor target
+    let anchorOffsetNeeded = calculateAnchorOffset(aiState.smoothedTarget, rightPaddle.position, rightSupport.position);
+    aiState.targetY = aiState.smoothedTarget + anchorOffsetNeeded;
+    
+    // Track velocity for combo detection
+    if (aiState.lastPositions.length > 5) {
+        aiState.lastPositions.shift();
+    }
+    aiState.lastPositions.push(aiState.smoothedTarget);
+    
+    // Calculate current velocity
+    if (aiState.lastPositions.length > 1) {
+        let recentDelta = aiState.lastPositions[aiState.lastPositions.length - 1] - 
+                         aiState.lastPositions[aiState.lastPositions.length - 2];
+        aiState.currentVelocity = Math.abs(recentDelta);
+        
+        // Check if we're at peak velocity (good time for combo bop)
+        if (aiState.currentVelocity > radius * phaseSpeed * 0.8 && !aiState.peakReached) {
+            aiState.peakReached = true;
+            aiState.maxVelocityPhase = aiState.windupPhase;
+            
+            // Consider combo bop at peak
+            if (!aiState.comboBop && !aiState.consideringBop && !bopState.right.active &&
+                Math.random() < aiSettings.comboBopChance * aiState.aggressionLevel) {
+                aiState.comboBop = true;
+                aiState.consideringBop = true;
+                aiState.bopDecisionTime = currentTime;
+                aiState.bopTiming = 50; // Quick bop at peak
+                console.log("AI planning COMBO: Windup + Bop!");
+            }
+        }
+    }
+    
+    // Check if it's time to swing
     let ballDistance = width - ballPos.x;
     let ballSpeed = Math.sqrt(ballVel.x * ballVel.x + ballVel.y * ballVel.y);
     
     let shouldSwing = windupTime > maxWindupTime || 
                      ballDistance < 120 || 
                      ballSpeed > 6 ||
-                     easedProgress > 0.85;
+                     (aiState.windupPhase > Math.PI * 2 && ballDistance < 200);
     
     if (shouldSwing) {
         aiState.mode = 'SWINGING';
         aiState.swingStartTime = currentTime;
-        aiState.windupProgress = 0;
+        aiState.windupPhase = 0;
+        aiState.peakReached = false;
+        aiState.comboBop = false;
+        aiState.lastPositions = [];
+        
+        // Carry momentum into swing
+        aiState.targetVelocity = aiState.currentVelocity * 2;
     }
 }
 
@@ -333,13 +464,27 @@ function executeAIMovement(aiSettings, rightSupport) {
     if (Math.abs(deltaY) > 1) {
         let baseSpeed = 0.12 * aiSettings.speed;
         
+        // Apply swing power during swing phase
         if (aiState.mode === 'SWINGING') {
             baseSpeed *= aiState.swingPower * (1 + aiState.aggressionLevel * 0.3);
+            
+            // Add momentum from windup if available
+            if (aiState.targetVelocity > 0) {
+                baseSpeed *= (1 + aiState.targetVelocity * 0.1);
+                aiState.targetVelocity *= 0.9; // Decay momentum
+            }
         } else if (aiState.mode === 'WINDING_UP') {
-            let windupSpeedMultiplier = 0.3 + (aiState.windupProgress * 0.4);
-            baseSpeed *= windupSpeedMultiplier;
+            // Enhanced windup speed based on phase and settings
+            let windupSpeedMultiplier = aiSettings.windupSpeed / AI_WINDUP_SPEED;
+            baseSpeed *= (1.5 + windupSpeedMultiplier);
+            
+            // Add extra speed at peak velocity points
+            if (aiState.peakReached) {
+                baseSpeed *= 1.3;
+            }
         }
         
+        // Apply aggression multiplier
         baseSpeed *= (1 + aiState.aggressionLevel * 0.3);
         
         let movement = deltaY * baseSpeed;
@@ -352,6 +497,7 @@ function executeAIMovement(aiSettings, rightSupport) {
         // Update input buffer for visual effects
         window.inputBuffer.right = movement / (SUPPORT_SPEED * 1.1);
     } else {
+        // Gradually reduce input buffer when AI is not moving
         window.inputBuffer.right *= 0.95;
     }
 }
