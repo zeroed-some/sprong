@@ -20,11 +20,11 @@ const AI_TRACKING_AGGRESSION = 0.15;  // How aggressively AI tracks the ball
 // ============= AI SETTINGS =============
 const AI_SETTINGS = {
     easy: {
-        reactionTime: 400,
+        reactionTime: 350,
         accuracy: 0.7,
         speed: 0.8,
         prediction: 0.3,
-        aggression: 0.2,
+        aggression: 0.4,
         oscillation: 0.3,
         bopChance: 0.25,
         windupSpeed: 0.1,
@@ -36,11 +36,11 @@ const AI_SETTINGS = {
         trackingAggression: 0.1
     },
     medium: {
-        reactionTime: 250,
+        reactionTime: 200,
         accuracy: 0.85,
         speed: 1.0,
         prediction: 0.6,
-        aggression: 0.5,
+        aggression: 0.7,
         oscillation: 0.7,
         bopChance: 0.55,
         windupSpeed: 0.15,
@@ -52,18 +52,18 @@ const AI_SETTINGS = {
         trackingAggression: 0.15
     },
     hard: {
-        reactionTime: 150,
+        reactionTime: 100,
         accuracy: 0.95,
-        speed: 1.3,  // Increased from 1.2
-        prediction: 0.85, // Increased from 0.8
-        aggression: 0.9,  // Increased from 0.8
+        speed: 1.5,
+        prediction: 0.85,
+        aggression: 1.0,
         oscillation: 1.0,
         bopChance: 0.85,
         windupSpeed: 0.2,
-        windupRadius: 60,  // Increased from 50
+        windupRadius: 60,
         comboBopChance: 0.5,
         circularMotion: 0.8,
-        phaseSpeed: 0.12,  // Increased from 0.1
+        phaseSpeed: 0.12,
         idleMovement: 0.8,
         trackingAggression: 0.25
     }

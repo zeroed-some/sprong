@@ -48,6 +48,7 @@ let mouseInput = {
 // Make necessary variables globally accessible for other scripts
 window.inputBuffer = inputBuffer;
 window.moveSupportEnhanced = moveSupportEnhanced;
+window.ball = null;
 
 function setup() {
     let canvas = createCanvas(CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -77,6 +78,7 @@ function setup() {
     
     // Create ball
     ball = resetBall(null, world, width, height);
+    window.ball = ball;
     
     // Add everything to the world
     World.add(world, [
@@ -101,10 +103,7 @@ function draw() {
         updateParticles();
         checkBallPosition();
         
-        // Enhanced collision detection during bops
-        if (bopState.left.active || bopState.right.active) {
-            Engine.update(engine, 8);
-        }
+        
         
         // Draw everything
         drawParticles();
@@ -197,6 +196,7 @@ function checkBallPosition() {
         rightScore++;
         updateScore();
         ball = resetBall(ball, world, width, height);
+        window.ball = ball;  // ADD THIS LINE - Update global reference
         gameStarted = false;
     }
     
@@ -204,6 +204,7 @@ function checkBallPosition() {
         leftScore++;
         updateScore();
         ball = resetBall(ball, world, width, height);
+        window.ball = ball;  // ADD THIS LINE - Update global reference
         gameStarted = false;
     }
 }
@@ -249,6 +250,7 @@ function keyPressed() {
         rightScore = 0;
         updateScore();
         ball = resetBall(ball, world, width, height);
+        window.ball = ball;
         gameStarted = false;
         
         inputBuffer.left = 0;

@@ -41,12 +41,12 @@ const IMPACT_PARTICLES      = 8;
 const SPRING_PARTICLE_RATE  = 0.3;
 
 // Bop system constants
-const BOP_FORCE             = 0.5;  // self explanatory.      BOP   it.
+const BOP_FORCE             = 0.2;  // self explanatory.      BOP   it.
 const BOP_RANGE             = 40;   // also self explanatory. TWIST it.
-const BOP_DURATION          = 900;  // traversal duration.    SHAKE it.
+const BOP_DURATION          = 1500; // traversal duration.    SHAKE it.
 const BOP_COOLDOWN          = 500;  // also also self expl.   PULL  it.
 const ANCHOR_RECOIL         = 40;   // How far the anchor moves backward during bop
-const BOP_VELOCITY_BOOST    = 6;    // Initial velocity boost for paddle
+const BOP_VELOCITY_BOOST    = 5;    // Initial velocity boost for paddle
 
 // ============= BOP SYSTEM =============
 let bopState = {
@@ -103,42 +103,38 @@ function activateBop(side, currentTime, paddle, support, engine, particles) {
     // Calculate direction from support to paddle
     let dx = paddle.position.x - support.position.x;
     let dy = paddle.position.y - support.position.y;
-    
+
     // Normalize direction
     let magnitude = Math.sqrt(dx * dx + dy * dy);
     if (magnitude > 0) {
         dx /= magnitude;
         dy /= magnitude;
+        // Calculate anchor recoil distance
+        let anchorRecoilDistance = ANCHOR_RECOIL * 0.3;
+
+        // Move support and paddle in one solver step (no teleport → no ghost collisions)
+        Body.translate(support, { x: -dx * anchorRecoilDistance, y: -dy * anchorRecoilDistance });
+        Body.translate(paddle,  { x: -dx * anchorRecoilDistance, y: -dy * anchorRecoilDistance });
+
+        // Remember where the support started so we can ease it back later
+        const preSupportPos = { x: support.position.x + dx * anchorRecoilDistance,
+                                y: support.position.y + dy * anchorRecoilDistance };
+        bopState[side].originalPos = preSupportPos;
         
-        // Calculate anchor recoil distance (reduced for gentler motion)
-        let anchorRecoilDistance = ANCHOR_RECOIL * 0.3; // Reduced from 0.4
-        
-        // Move the support BACKWARD (recoil effect)
-        let newSupportX = support.position.x - dx * anchorRecoilDistance;
-        let newSupportY = support.position.y - dy * anchorRecoilDistance;
-        
-        Body.setPosition(support, { x: newSupportX, y: newSupportY });
-        
-        // Store original support position for recovery
-        bopState[side].originalPos = { 
-            x: support.position.x + dx * anchorRecoilDistance, 
-            y: support.position.y + dy * anchorRecoilDistance 
-        };
-        
-        // Set paddle velocity directly for immediate forward thrust (gentler)
-        let forwardSpeed = BOP_VELOCITY_BOOST * 0.8; // Reduced intensity
+        // Now apply forward thrust from this new position
+        let forwardSpeed = BOP_VELOCITY_BOOST * 1.0; // Restored to full power
         Body.setVelocity(paddle, {
             x: paddle.velocity.x + dx * forwardSpeed,
             y: paddle.velocity.y + dy * forwardSpeed
         });
-        
-        // Apply a forward force for continued acceleration (gentler)
+
+        // Apply a forward force for continued acceleration
         Body.applyForce(paddle, paddle.position, {
-            x: dx * bopState[side].power * BOP_RANGE * 0.05, // Reduced from 0.1
-            y: dy * bopState[side].power * BOP_RANGE * 0.05
+            x: dx * bopState[side].power * BOP_RANGE * 0.08,
+            y: dy * bopState[side].power * BOP_RANGE * 0.08
         });
-        
-        // Create particle burst for visual feedback
+
+        // Create particle burst for visual feedback at the support position
         for (let i = 0; i < 5; i++) {
             let angle = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.5;
             let speed = Math.random() * 4 + 2;
@@ -176,6 +172,7 @@ function updateBopStates(currentTime, leftSupport, rightSupport, leftPaddle, rig
                 let currentX = support.position.x;
                 let currentY = support.position.y;
                 
+                // Smooth return motion with easing
                 let returnSpeed = 0.15 * (1 - Math.pow(1 - progress, 3));
                 let newX = currentX + (bopState.left.originalPos.x - currentX) * returnSpeed;
                 let newY = currentY + (bopState.left.originalPos.y - currentY) * returnSpeed;
@@ -187,7 +184,7 @@ function updateBopStates(currentTime, leftSupport, rightSupport, leftPaddle, rig
         }
     }
     
-    // Update right bop
+    // Update right bop (same logic)
     if (bopState.right.active) {
         let elapsed = currentTime - bopState.right.startTime;
         let progress = elapsed / bopState.right.duration;
@@ -392,12 +389,9 @@ function setupCollisionHandlers(engine, ball, leftPaddle, rightPaddle, particles
                     if (contactPoint) {
                         isValidCollision = true;
                     } else {
-                        // Fallback distance check
-                        let dx = ball.position.x - paddle.position.x;
-                        let dy = ball.position.y - paddle.position.y;
-                        let distance = Math.sqrt(dx * dx + dy * dy);
-                        let collisionThreshold = BALL_RADIUS + Math.max(PADDLE_WIDTH, PADDLE_HEIGHT)/2 + 10;
-                        isValidCollision = distance < collisionThreshold;
+                        // Use penetration depth as fallback to avoid false positives
+                        const depth = collision.depth || 0;
+                        isValidCollision = depth > 0.5;
                     }
                     
                     if (isValidCollision) {
