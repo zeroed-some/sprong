@@ -6,10 +6,60 @@ const Bodies = Matter.Bodies;
 const Render = Matter.Render;
 const Constraint = Matter.Constraint;
 
+// Canvas settings
+const CANVAS_WIDTH  = 800;
+const CANVAS_HEIGHT = 400;
+
+// Game constants
+const BALL_SPEED    = 6;
+const BALL_RADIUS   = 12;
+const PADDLE_WIDTH  = 20;
+const PADDLE_HEIGHT = 80;
+
+// Enhanced movement constants (tuned for faster response)
+const SUPPORT_SPEED     = 6.5;  // Bumped up
+const SUPPORT_ACCEL     = 1.2;  // Increased acceleration
+const INPUT_SMOOTHING   = 0.25; // More responsive
+const SUPPORT_MAX_SPEED = 8;    // Higher max speed
+
+// Touch/mouse control constants
+const MOUSE_SPEED_LIMIT = 4;    // Max speed for mouse movement
+const MOUSE_LAG_FACTOR  = 0.12; // How much lag in mouse following
+const TOUCH_SENSITIVITY = 1.2;  // Touch movement multiplier
+
+// Spring physics constants (using your current settings)
+const PADDLE_MASS       = 0.8;  
+const SPRING_LENGTH     = 50;   
+const SPRING_DAMPING    = 0.6;  
+const SPRING_STIFFNESS  = 0.025;
+
+// Visual enhancement constants
+const TRAIL_SEGMENTS        = 8;
+const PADDLE_GLOW_DISTANCE  = 25;
+const SPRING_GLOW_INTENSITY = 120; // More intense glow
+
+// Particle system constants
+const MAX_PARTICLES         = 100;
+const PARTICLE_LIFE         = 60;
+const IMPACT_PARTICLES      = 8;
+const SPRING_PARTICLE_RATE  = 0.3;
+
+// Bop system constants
+const BOP_FORCE             = 1.0;
+const BOP_DURATION          = 300;
+const BOP_COOLDOWN          = 500;
+const ANCHOR_RECOIL         = 40;     // How far the anchor moves backward during bop
+const BOP_RANGE             = 600;    // How far the paddle can thrust forward
+const BOP_VELOCITY_BOOST    = 12;     // Initial velocity boost for paddle
+
 // Game variables
 let ball;
 let world;
 let engine;
+
+// Particle systems
+let particles = [];
+let impactParticles = [];
 
 // Spring paddle system components
 let boundaries = [];
@@ -17,12 +67,12 @@ let leftSupport, leftPaddle, leftSpring;
 let rightSupport, rightPaddle, rightSpring;
 
 // Game state
-let leftScore = 0;
+let leftScore  = 0;
 let rightScore = 0;
-let gameStarted = false;
-let gameState = 'menu'; // 'menu', 'playing', 'paused'
-let gameMode = 'vs-cpu'; // 'vs-cpu' or 'vs-human'
 let aiEnabled = true;
+let gameState = 'menu';   // 'menu', 'playing', 'paused'
+let gameMode  = 'vs-cpu'; // 'vs-cpu' or 'vs-human'
+let gameStarted = false;
 
 // Menu state
 let menuState = {
@@ -59,12 +109,228 @@ let aiState = {
     idleTarget: 200,      // Where AI "wants" to be when idle
     microAdjustment: 0,   // Small random movements
     breathingOffset: 0,   // Subtle breathing-like motion
-    lastMicroTime: 0      // For micro-movement timing
+    lastMicroTime: 0,     // For micro-movement timing
+    
+    // AI Bop system
+    consideringBop: false,  // Is AI thinking about bopping?
+    bopDecisionTime: 0,     // When AI decided to bop
+    bopTiming: 200          // How long before ball contact to bop (ms)
 };
 
 // Player input
 let keys = {};
 let inputBuffer = { left: 0, right: 0 };
+
+// Bop system
+let bopState = {
+    left: {
+        active: false,
+        startTime: 0,
+        duration: BOP_DURATION,
+        power: BOP_FORCE,
+        cooldown: BOP_COOLDOWN,
+        lastBopTime: 0,
+        originalPos: null
+    },
+    right: {
+        active: false,
+        startTime: 0,
+        duration: BOP_DURATION,
+        power: BOP_FORCE,
+        cooldown: BOP_COOLDOWN,
+        lastBopTime: 0,
+        originalPos: null
+    }
+};
+
+function handleBopInput() {
+    let currentTime = millis();
+    
+    // Left player bop - use Left Shift for both modes
+    let leftBopPressed = keys['Shift'] && !keys['Control']; // Left shift (without Ctrl)
+    
+    if (leftBopPressed && !bopState.left.active && 
+        currentTime - bopState.left.lastBopTime > bopState.left.cooldown) {
+        activateBop('left', currentTime);
+    }
+    
+    // Right player bop (Enter - only in two player mode)
+    if (!aiEnabled) {
+        let rightBopPressed = keys['Enter'];
+        
+        if (rightBopPressed && !bopState.right.active && 
+            currentTime - bopState.right.lastBopTime > bopState.right.cooldown) {
+            activateBop('right', currentTime);
+        }
+    }
+    
+    // Update active bops
+    updateBopStates(currentTime);
+}
+
+function activateBop(side, currentTime) {
+    bopState[side].active = true;
+    bopState[side].startTime = currentTime;
+    bopState[side].lastBopTime = currentTime;
+    
+    // Get the relevant bodies
+    let paddle = side === 'left' ? leftPaddle : rightPaddle;
+    let support = side === 'left' ? leftSupport : rightSupport;
+    
+    // Calculate direction from support to paddle (this is the bop direction)
+    let dx = paddle.position.x - support.position.x;
+    let dy = paddle.position.y - support.position.y;
+    
+    // Normalize direction
+    let magnitude = Math.sqrt(dx * dx + dy * dy);
+    if (magnitude > 0) {
+        dx /= magnitude;
+        dy /= magnitude;
+        
+        // Calculate anchor recoil distance
+        let anchorRecoilDistance = ANCHOR_RECOIL * 0.4;
+        
+        // Move the support BACKWARD (recoil effect)
+        let newSupportX = support.position.x - dx * anchorRecoilDistance;
+        let newSupportY = support.position.y - dy * anchorRecoilDistance;
+        
+        // Apply the support movement
+        Body.setPosition(support, { x: newSupportX, y: newSupportY });
+        
+        // Store original support position for recovery
+        bopState[side].originalPos = { 
+            x: support.position.x + dx * anchorRecoilDistance, 
+            y: support.position.y + dy * anchorRecoilDistance 
+        };
+        
+        // IMPORTANT: Set paddle velocity directly for immediate forward thrust
+        // This creates the "shooting forward" effect based on BOP_RANGE
+        let forwardSpeed = (BOP_RANGE / SPRING_LENGTH) * BOP_VELOCITY_BOOST;
+        Body.setVelocity(paddle, {
+            x: paddle.velocity.x + dx * forwardSpeed,
+            y: paddle.velocity.y + dy * forwardSpeed
+        });
+        
+        // Also apply a strong forward force for continued acceleration
+        Body.applyForce(paddle, paddle.position, {
+            x: dx * bopState[side].power * BOP_RANGE * 0.1,
+            y: dy * bopState[side].power * BOP_RANGE * 0.1
+        });
+        
+        // Create particle burst for visual feedback
+        for (let i = 0; i < 5; i++) {
+            let angle = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.5;
+            let speed = Math.random() * 4 + 2;
+            particles.push({
+                x: support.position.x,
+                y: support.position.y,
+                vx: Math.cos(angle) * speed * -1, // Particles go backward
+                vy: Math.sin(angle) * speed * -1,
+                size: Math.random() * 3 + 2,
+                life: 30,
+                maxLife: 30,
+                color: { r: 255, g: 255, b: 100 },
+                type: 'impact'
+            });
+        }
+        
+        // Force collision detection update
+        Engine.update(engine, 0);
+    }
+    
+    console.log(side + " player BOP!");
+}
+
+function updateBopStates(currentTime) {
+    // Update left bop
+    if (bopState.left.active) {
+        let elapsed = currentTime - bopState.left.startTime;
+        let progress = elapsed / bopState.left.duration;
+        
+        if (progress >= 1.0) {
+            // Bop finished
+            bopState.left.active = false;
+            bopState.left.originalPos = null;
+        } else {
+            // Smoothly return support to original position
+            if (bopState.left.originalPos) {
+                let support = leftSupport;
+                let currentX = support.position.x;
+                let currentY = support.position.y;
+                
+                // Ease back to original position
+                let returnSpeed = 0.15 * (1 - Math.pow(1 - progress, 3)); // Ease out cubic
+                let newX = currentX + (bopState.left.originalPos.x - currentX) * returnSpeed;
+                let newY = currentY + (bopState.left.originalPos.y - currentY) * returnSpeed;
+                
+                Body.setPosition(support, { x: newX, y: newY });
+            }
+            
+            // Apply range limiting during active bop
+            limitBopRange(leftSupport, leftPaddle);
+        }
+    }
+    
+    // Update right bop
+    if (bopState.right.active) {
+        let elapsed = currentTime - bopState.right.startTime;
+        let progress = elapsed / bopState.right.duration;
+        
+        if (progress >= 1.0) {
+            // Bop finished
+            bopState.right.active = false;
+            bopState.right.originalPos = null;
+        } else {
+            // Smoothly return support to original position
+            if (bopState.right.originalPos) {
+                let support = rightSupport;
+                let currentX = support.position.x;
+                let currentY = support.position.y;
+                
+                // Ease back to original position
+                let returnSpeed = 0.15 * (1 - Math.pow(1 - progress, 3)); // Ease out cubic
+                let newX = currentX + (bopState.right.originalPos.x - currentX) * returnSpeed;
+                let newY = currentY + (bopState.right.originalPos.y - currentY) * returnSpeed;
+                
+                Body.setPosition(support, { x: newX, y: newY });
+            }
+            
+            // Apply range limiting during active bop
+            limitBopRange(rightSupport, rightPaddle);
+        }
+    }
+}
+
+function limitBopRange(support, paddle) {
+    // Calculate current distance
+    let currentDistance = dist(support.position.x, support.position.y,
+                              paddle.position.x, paddle.position.y);
+    
+    // If paddle is beyond max range (spring length + bop range), pull it back
+    let maxDistance = SPRING_LENGTH + BOP_RANGE;
+    if (currentDistance > maxDistance) {
+        // Calculate direction from support to paddle
+        let dx = paddle.position.x - support.position.x;
+        let dy = paddle.position.y - support.position.y;
+        
+        // Normalize
+        let magnitude = Math.sqrt(dx * dx + dy * dy);
+        dx /= magnitude;
+        dy /= magnitude;
+        
+        // Set paddle position at max distance
+        let newX = support.position.x + dx * maxDistance;
+        let newY = support.position.y + dy * maxDistance;
+        
+        // Preserve some velocity but dampen it
+        let currentVel = paddle.velocity;
+        Body.setPosition(paddle, { x: newX, y: newY });
+        Body.setVelocity(paddle, { 
+            x: currentVel.x * 0.7, 
+            y: currentVel.y * 0.7 
+        });
+    }
+}
 
 // Touch/mouse input
 let mouseInput = {
@@ -76,43 +342,13 @@ let mouseInput = {
     deadZone: 15      // Minimum distance before movement starts
 };
 
-// Particle systems
-let particles = [];
-let impactParticles = [];
-
-// Canvas settings
-const CANVAS_WIDTH  = 800;
-const CANVAS_HEIGHT = 400;
-
-// Game constants
-const BALL_SPEED    = 6;
-const BALL_RADIUS   = 12;
-const PADDLE_WIDTH  = 20;
-const PADDLE_HEIGHT = 80;
-
-// Enhanced movement constants (tuned for faster response)
-const SUPPORT_SPEED     = 6.5;    // Bumped up from 4.5
-const SUPPORT_ACCEL     = 1.2;    // Increased acceleration
-const INPUT_SMOOTHING   = 0.25;   // More responsive
-const SUPPORT_MAX_SPEED = 8;      // Higher max speed
-
-// Touch/mouse control constants
-const MOUSE_LAG_FACTOR  = 0.12;   // How much lag in mouse following
-const MOUSE_SPEED_LIMIT = 4;      // Max speed for mouse movement
-const TOUCH_SENSITIVITY = 1.2;    // Touch movement multiplier
-
-// Spring physics constants (adjusted for better oscillation)
-const PADDLE_MASS       = 0.8;    // Back to more stable value
-const SPRING_LENGTH     = 50;     // Increased from 40 for more room
-const SPRING_DAMPING    = 0.6;    // More damping = less erratic
-const SPRING_STIFFNESS  = 0.025;  // Slightly lower for smoother motion
 
 // AI difficulty settings
 const AI_SETTINGS = {
     easy: {
         reactionTime: 400,    // ms delay
         accuracy: 0.7,        // 70% accuracy
-        speed: 0.6,           // 60% of normal speed
+        speed: 0.8,           // Increased from 0.6
         prediction: 0.3,      // 30% prediction vs reaction
         aggression: 0.2,      // Low aggression
         oscillation: 0.3      // Minimal oscillation
@@ -120,7 +356,7 @@ const AI_SETTINGS = {
     medium: {
         reactionTime: 250,
         accuracy: 0.85,
-        speed: 0.8,
+        speed: 1.0,           // Increased from 0.8
         prediction: 0.6,
         aggression: 0.5,      // Moderate aggression
         oscillation: 0.7      // Good oscillation technique
@@ -128,23 +364,12 @@ const AI_SETTINGS = {
     hard: {
         reactionTime: 150,
         accuracy: 0.95,
-        speed: 1.0,
+        speed: 1.2,           // Increased from 1.0 
         prediction: 0.8,
         aggression: 0.8,      // High aggression
         oscillation: 1.0      // Master-level oscillation
     }
 };
-
-// Visual enhancement constants
-const TRAIL_SEGMENTS        = 8;
-const PADDLE_GLOW_DISTANCE  = 25;
-const SPRING_GLOW_INTENSITY = 120; // More intense glow
-
-// Particle system constants
-const MAX_PARTICLES         = 100;
-const PARTICLE_LIFE         = 60;
-const IMPACT_PARTICLES      = 8;
-const SPRING_PARTICLE_RATE  = 0.3;
 
 function setup() {
     // Create p5.js canvas
@@ -179,10 +404,42 @@ function setup() {
         rightSupport, rightPaddle, rightSpring
     ]);
     
-    console.log("Sprong Phase 5 Complete!");
-    console.log("Particle effects system");
-    console.log("Tuned physics for maximum bounce");
-    console.log("Faster, more responsive paddles");
+    // Set up collision events
+    Matter.Events.on(engine, 'collisionStart', function(event) {
+        let pairs = event.pairs;
+        
+        for (let i = 0; i < pairs.length; i++) {
+            let pair = pairs[i];
+            
+            // Check if collision involves ball and paddle
+            if ((pair.bodyA === ball && (pair.bodyB === leftPaddle || pair.bodyB === rightPaddle)) ||
+                (pair.bodyB === ball && (pair.bodyA === leftPaddle || pair.bodyA === rightPaddle))) {
+                
+                let paddle = pair.bodyA === ball ? pair.bodyB : pair.bodyA;
+                let isLeftPaddle = paddle === leftPaddle;
+                
+                // Apply bop boost if paddle is currently bopping
+                if ((isLeftPaddle && bopState.left.active) || (!isLeftPaddle && bopState.right.active)) {
+                    // Get current velocities
+                    let ballVel = ball.velocity;
+                    let paddleVel = paddle.velocity;
+                    
+                    // Calculate boost based on paddle velocity
+                    let boostX = paddleVel.x * 0.5;
+                    let boostY = paddleVel.y * 0.5;
+                    
+                    // Apply extra velocity to ball
+                    Body.setVelocity(ball, {
+                        x: ballVel.x * 1.3 + boostX,
+                        y: ballVel.y * 1.3 + boostY
+                    });
+                    
+                    // Create extra impact particles
+                    createImpactParticles(ball.position.x, ball.position.y, ballVel.x, ballVel.y);
+                }
+            }
+        }
+    });
 }
 
 function createSpringPaddleSystem(side) {
@@ -202,8 +459,19 @@ function createSpringPaddleSystem(side) {
             mass: PADDLE_MASS,
             restitution: 1.3,  // Even bouncier!
             friction: 0,
-            frictionAir: 0.005 // Less air resistance
+            frictionAir: 0.005, // Less air resistance
+            isSensor: false,
+            slop: 0.01,  // Tighter collision detection
+            render: {
+                fillStyle: '#00ff88'
+            }
         });
+        
+        // Enable continuous collision detection for better bop collisions
+        leftPaddle.collisionFilter = {
+            category: 0x0002,
+            mask: 0xFFFF
+        };
         
         // Spring constraint connecting support to paddle
         leftSpring = Constraint.create({
@@ -225,8 +493,19 @@ function createSpringPaddleSystem(side) {
             mass: PADDLE_MASS,
             restitution: 1.2,  // Slightly toned down
             friction: 0,
-            frictionAir: 0.008 // Bit more air resistance for stability
+            frictionAir: 0.008, // Bit more air resistance for stability
+            isSensor: false,
+            slop: 0.01,  // Tighter collision detection
+            render: {
+                fillStyle: '#ff6464'
+            }
         });
+        
+        // Enable continuous collision detection for better bop collisions
+        rightPaddle.collisionFilter = {
+            category: 0x0004,
+            mask: 0xFFFF
+        };
         
         // Spring constraint connecting support to paddle
         rightSpring = Constraint.create({
@@ -256,6 +535,13 @@ function draw() {
         updateParticles();
         checkCollisions();
         
+        // Enhanced collision detection during bops - just more frequent updates
+        if (bopState.left.active || bopState.right.active) {
+            // Multiple smaller physics updates for better collision detection
+            Engine.update(engine, 8);
+            Engine.update(engine, 8);
+        }
+        
         // Check for scoring
         checkBallPosition();
         
@@ -282,6 +568,9 @@ function handleEnhancedInput() {
     // Handle both keyboard and mouse/touch input
     handleKeyboardInput();
     handleMouseTouchInput();
+    
+    // Handle bop mechanics
+    handleBopInput();
     
     // Handle AI if enabled
     if (aiEnabled && gameStarted) {
@@ -448,12 +737,43 @@ function handleAITracking(currentTime, ballPos, ballVel, aiSettings) {
     desiredPaddleY = constrain(desiredPaddleY, 80, height - 80);
     
     // Estimate anchor position needed to get paddle to desired position
-    // This is tricky because spring physics affects paddle position
     let anchorOffsetNeeded = calculateAnchorOffset(desiredPaddleY, paddlePos, anchorPos);
     let targetAnchorY = desiredPaddleY + anchorOffsetNeeded;
     
     // Always apply some level of paddle-aware tracking
     aiState.targetY = lerp(aiState.targetY, targetAnchorY, trackingIntensity);
+    
+    // AI Bop decision logic
+    if (ballApproaching && ballDistance < 150 && !aiState.consideringBop) {
+        // Consider bopping if ball is close and conditions are right
+        let shouldConsiderBop = ballSpeed > 8 &&  // Fast incoming ball
+                               Math.abs(ballVel.y) < 4 &&  // Not too much vertical movement
+                               random() < aiSettings.aggression * 0.4; // Chance based on aggression
+        
+        if (shouldConsiderBop) {
+            aiState.consideringBop = true;
+            aiState.bopDecisionTime = currentTime;
+        }
+    }
+    
+    // Execute bop at the right moment
+    if (aiState.consideringBop && ballApproaching) {
+        let timeToBop = currentTime - aiState.bopDecisionTime;
+        let shouldBop = timeToBop > aiState.bopTiming && 
+                       ballDistance < 100 && 
+                       !bopState.right.active &&
+                       currentTime - bopState.right.lastBopTime > BOP_COOLDOWN;
+        
+        if (shouldBop) {
+            activateBop('right', currentTime);
+            aiState.consideringBop = false;
+        }
+        
+        // Cancel bop consideration if ball gets too far
+        if (ballDistance > 150) {
+            aiState.consideringBop = false;
+        }
+    }
     
     // Only do advanced prediction and windup logic if enough time has passed (reaction delay)
     if (currentTime - aiState.lastUpdateTime > aiSettings.reactionTime) {
@@ -486,6 +806,7 @@ function handleAITracking(currentTime, ballPos, ballVel, aiSettings) {
                               ballDistance > 200 &&       // Lots of distance required  
                               Math.abs(ballVel.y) < 3 &&  // Very limited vertical movement
                               Math.abs(ballVel.x) > 1 &&  // Ball must be actually moving toward AI
+                              !aiState.consideringBop &&  // Don't windup if considering bop
                               random() < aiSettings.oscillation * aiState.aggressionLevel * 0.3; // Much lower chance
             
             if (shouldWindUp) {
@@ -529,28 +850,39 @@ function calculateAnchorOffset(targetPaddleY, currentPaddlePos, currentAnchorPos
 
 function handleAIWindup(currentTime, ballPos, ballVel, aiSettings) {
     let windupTime = currentTime - aiState.windupStartTime;
-    let maxWindupTime = 500 / Math.max(aiState.aggressionLevel, 0.3); // Longer windup for bigger movement
     
-    // Calculate windup target with much bigger distance
-    let paddlePos = rightPaddle.position;
-    let windupTarget = paddlePos.y + aiState.windupDirection * aiState.windupDistance * aiState.aggressionLevel;
-    windupTarget = constrain(windupTarget, 50, height - 50); // Allow closer to edges for big windup
+    // Smooth windup progression with easing
+    let maxWindupTime = 800; // Longer time for smooth movement
+    let timeProgress = Math.min(windupTime / maxWindupTime, 1.0);
+    
+    // Ease-in-out for smooth acceleration/deceleration
+    let easedProgress = timeProgress < 0.5 
+        ? 2 * timeProgress * timeProgress 
+        : 1 - Math.pow(-2 * timeProgress + 2, 3) / 2;
+    
+    aiState.windupProgress = easedProgress;
+    
+    // Calculate smooth windup target based on intercept position
+    let windupTargetY = aiState.interceptY + aiState.windupDirection * aiState.windupDistance * aiState.aggressionLevel * easedProgress;
+    windupTargetY = constrain(windupTargetY, 50, height - 50);
     
     // Convert paddle target to anchor target using paddle awareness
-    let anchorOffsetNeeded = calculateAnchorOffset(windupTarget, paddlePos, rightSupport.position);
-    aiState.targetY = windupTarget + anchorOffsetNeeded;
+    let anchorOffsetNeeded = calculateAnchorOffset(windupTargetY, rightPaddle.position, rightSupport.position);
+    aiState.targetY = windupTargetY + anchorOffsetNeeded;
     
-    // Check if it's time to swing - allow more time for bigger windups
+    // Check if it's time to swing
     let ballDistance = width - ballPos.x;
     let ballSpeed = Math.sqrt(ballVel.x * ballVel.x + ballVel.y * ballVel.y);
     
     let shouldSwing = windupTime > maxWindupTime || 
                      ballDistance < 120 || 
-                     ballSpeed > 6; // Abort if ball speeds up even slightly
+                     ballSpeed > 6 ||
+                     easedProgress > 0.85; // Swing when windup is mostly complete
     
     if (shouldSwing) {
         aiState.mode = 'SWINGING';
         aiState.swingStartTime = currentTime;
+        aiState.windupProgress = 0; // Reset for next time
     }
 }
 
@@ -608,25 +940,27 @@ function executeAIMovement(aiSettings) {
     let deltaY = aiState.targetY - currentY;
     
     if (Math.abs(deltaY) > 1) { // Very small dead zone for responsive tracking
-        let baseSpeed = 0.08 * aiSettings.speed; // Back to more responsive speed
+        let baseSpeed = 0.12 * aiSettings.speed; // Increased base speed significantly
         
         // Apply swing power during swing phase
         if (aiState.mode === 'SWINGING') {
             baseSpeed *= aiState.swingPower * (1 + aiState.aggressionLevel * 0.3);
         } else if (aiState.mode === 'WINDING_UP') {
-            baseSpeed *= 0.6; // Slower during windup for more deliberate movement
+            // Slower at start of windup, faster as it progresses
+            let windupSpeedMultiplier = 0.3 + (aiState.windupProgress * 0.4);
+            baseSpeed *= windupSpeedMultiplier;
         }
         
         // Apply aggression multiplier
-        baseSpeed *= (1 + aiState.aggressionLevel * 0.2);
+        baseSpeed *= (1 + aiState.aggressionLevel * 0.3);
         
         let movement = deltaY * baseSpeed;
-        movement = constrain(movement, -SUPPORT_SPEED * 0.9, SUPPORT_SPEED * 0.9);
+        movement = constrain(movement, -SUPPORT_SPEED * 1.1, SUPPORT_SPEED * 1.1); // Allow slightly faster than player
         
         moveSupportEnhanced(rightSupport, movement);
         
         // Update input buffer for visual effects
-        inputBuffer.right = constrain(movement / (SUPPORT_SPEED * 0.9), -1, 1);
+        inputBuffer.right = constrain(movement / (SUPPORT_SPEED * 1.1), -1, 1);
     } else {
         // Gradually reduce input buffer when AI is not moving
         inputBuffer.right *= 0.95;
@@ -864,10 +1198,23 @@ function drawSinglePaddleEnhanced(paddle, ballDistance) {
     
     // Check if this is the AI paddle
     let isAI = aiEnabled && paddle === rightPaddle;
+    let isLeft = paddle === leftPaddle;
     
     // Calculate glow intensity based on ball proximity
     let glowIntensity = map(ballDistance, 0, PADDLE_GLOW_DISTANCE, 150, 0);
     glowIntensity = constrain(glowIntensity, 0, 150);
+    
+    // Add bop glow effect
+    let bopGlow = 0;
+    if (isLeft && bopState.left.active) {
+        let bopProgress = (millis() - bopState.left.startTime) / bopState.left.duration;
+        bopGlow = (1 - bopProgress) * 100; // Fade out over bop duration
+    } else if (!isLeft && !isAI && bopState.right.active) {
+        let bopProgress = (millis() - bopState.right.startTime) / bopState.right.duration;
+        bopGlow = (1 - bopProgress) * 100;
+    }
+    
+    glowIntensity += bopGlow;
     
     // Add AI state-based effects
     if (isAI) {
@@ -894,6 +1241,11 @@ function drawSinglePaddleEnhanced(paddle, ballDistance) {
         paddleColor = [255, 150, 50]; // Orange during windup
     } else if (isAI && aiState.mode === 'SWINGING') {
         paddleColor = [255, 50, 50]; // Bright red during swing
+    }
+    
+    // Bop color override
+    if ((isLeft && bopState.left.active) || (!isLeft && !isAI && bopState.right.active)) {
+        paddleColor = [255, 255, 100]; // Bright yellow during bop
     }
     
     // Draw enhanced glow effect first
@@ -1109,9 +1461,9 @@ function drawMenu() {
     textSize(12);
     fill(255, 100);
     if (menuState.selectedOption === 0) {
-        text("Controls: W/S keys or Mouse/Touch to move paddle", width/2, height - 30);
+        text("Controls: W/S keys + LEFT SHIFT (bop) or Mouse/Touch", width/2, height - 30);
     } else {
-        text("Controls: Player 1 (W/S) | Player 2 (↑/↓) | Mouse/Touch", width/2, height - 30);
+        text("Controls: P1 (W/S + L.Shift) | P2 (↑/↓ + Enter) | Mouse/Touch", width/2, height - 30);
     }
 }
 
@@ -1169,11 +1521,19 @@ function resetBall() {
         World.remove(world, ball);
     }
     
-    // Create new ball at center
+    // Create new ball at center with collision filter
     ball = Bodies.circle(width/2, height/2, BALL_RADIUS, {
         restitution: 1,
         friction: 0,
-        frictionAir: 0
+        frictionAir: 0,
+        slop: 0.01,  // Tighter collision detection
+        collisionFilter: {
+            category: 0x0001,
+            mask: 0xFFFF
+        },
+        render: {
+            fillStyle: '#ff6464'
+        }
     });
     
     if (world) {
@@ -1275,6 +1635,7 @@ function keyPressed() {
         aiState.lastUpdateTime = 0;
         aiState.mode = 'ANTICIPATING';
         aiState.aggressionLevel = AI_SETTINGS[aiState.difficulty].aggression;
+        aiState.windupProgress = 0;
         
         // Clear particles
         particles = [];
@@ -1283,7 +1644,7 @@ function keyPressed() {
     }
     
     // Return to menu with ESC
-    if (keyCode === 27) {
+    if (keyCode === 27) { // ESC key
         gameState = 'menu';
         gameStarted = false;
         particles = [];
